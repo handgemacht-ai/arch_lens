@@ -1,0 +1,56 @@
+%{
+  configs: [
+    %{
+      name: "default",
+      files: %{
+        included: ["lib/", "test/", "config/"],
+        excluded: [~r"/_build/", ~r"/deps/"]
+      },
+      plugins: [],
+      requires: [],
+      strict: true,
+      parse_timeout: 5000,
+      color: true,
+      checks: %{
+        enabled: [
+          {Credo.Check.Consistency.ExceptionNames, []},
+          {Credo.Check.Consistency.LineEndings, []},
+          {Credo.Check.Consistency.ParameterPatternMatching, []},
+          {Credo.Check.Consistency.SpaceAroundOperators, []},
+          {Credo.Check.Consistency.SpaceInParentheses, []},
+          {Credo.Check.Consistency.TabsOrSpaces, []},
+          {Credo.Check.Design.AliasUsage, [priority: :low, if_nested_deeper_than: 2]},
+          {Credo.Check.Design.TagTODO, [exit_status: 0]},
+          {Credo.Check.Design.TagFIXME, []},
+          {Credo.Check.Readability.AliasOrder, []},
+          {Credo.Check.Readability.FunctionNames, []},
+          {Credo.Check.Readability.ModuleAttributeNames, []},
+          {Credo.Check.Readability.ModuleDoc, []},
+          {Credo.Check.Readability.ModuleNames, []},
+          {Credo.Check.Readability.ParenthesesInCondition, []},
+          {Credo.Check.Readability.PredicateFunctionNames, []},
+          {Credo.Check.Readability.RedundantBlankLines, []},
+          {Credo.Check.Readability.Semicolons, []},
+          {Credo.Check.Readability.TrailingBlankLine, []},
+          {Credo.Check.Readability.TrailingWhiteSpace, []},
+          {Credo.Check.Readability.VariableNames, []},
+          {Credo.Check.Refactor.CondStatements, []},
+          {Credo.Check.Refactor.FunctionArity, []},
+          {Credo.Check.Refactor.MatchInCondition, []},
+          {Credo.Check.Refactor.Nesting, []},
+          {Credo.Check.Refactor.UnlessWithElse, []},
+          {Credo.Check.Warning.BoolOperationOnSameValues, []},
+          {Credo.Check.Warning.IExPry, []},
+          {Credo.Check.Warning.IoInspect, []},
+          {Credo.Check.Warning.OperationOnSameValues, []},
+          {Credo.Check.Warning.UnusedEnumOperation, []},
+          {Credo.Check.Warning.UnusedKeywordOperation, []},
+          {Credo.Check.Warning.UnusedListOperation, []},
+          {Credo.Check.Warning.UnusedStringOperation, []},
+          {Credo.Check.Warning.UnusedTupleOperation, []}
+        ],
+        disabled: []
+      }
+    }
+  ]
+}
