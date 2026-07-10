@@ -26,9 +26,19 @@ defmodule ArchLens.System do
   `use`s directly.
 
   The declarations are *validated against what the generator actually collected*
-  at generation time (`ArchLens.System.Declared`): an actor may not claim an entry
-  point that does not exist, a declared HTTP external must match a collected
-  boundary or a dependency, and a context's module prefix must name real modules.
+  at generation time (`ArchLens.System.Declared`):
+
+    * an actor's `uses:` must name known entry-point kinds — `:browser`, `:api`,
+      `:webhook`, `:oauth`, `:mcp`, `:other` (`ArchLens.Collect.EntryPoints.kinds/0`);
+      an unknown atom always fails, and when entry points were collected each kind
+      must also have been collected (this collected cross-check is skipped, with a
+      warning, when nothing was collected),
+    * a declared HTTP external must match a collected boundary or a dependency, and
+    * a context's module prefix must name real modules.
+
+  The cross-checks against collected boundaries and modules are skipped, with a
+  recorded warning, when those inputs were not collected; the `uses:` vocabulary
+  check is not.
   """
 
   use Spark.Dsl, default_extensions: [extensions: [ArchLens.System.Dsl]]

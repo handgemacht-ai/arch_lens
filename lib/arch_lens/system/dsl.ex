@@ -27,7 +27,10 @@ defmodule ArchLens.System.Dsl do
       uses: [
         type: {:list, :atom},
         default: [],
-        doc: "Entry points / surfaces the actor drives, e.g. `[:api, :mcp, :browser]`."
+        doc:
+          "Entry-point kinds the actor drives — any of `:browser`, `:api`, `:webhook`, " <>
+            "`:oauth`, `:mcp`, `:other`; e.g. `[:api, :mcp, :browser]`. Validated against " <>
+            "the collected entry points at generation time."
       ],
       does: [
         type: :string,

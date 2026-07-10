@@ -27,6 +27,13 @@ defmodule ArchLens.System.ValidateTest do
       assert {:ok, []} = Validate.validate(declared, ctx)
     end
 
+    test "passes for vocabulary kinds beyond the original four when collected" do
+      declared = declared(actors: [actor(:dev, [:oauth, :other])])
+      ctx = Validate.context(%{entry_points: [%{kind: :oauth}, %{kind: :other}]})
+
+      assert {:ok, []} = Validate.validate(declared, ctx)
+    end
+
     test "fails when an actor claims an uncollected entry point" do
       declared = declared(actors: [actor(:dev, [:api, :webhook])])
       ctx = Validate.context(%{entry_points: [%{kind: :api}]})
@@ -36,14 +43,40 @@ defmodule ArchLens.System.ValidateTest do
       assert message =~ ":webhook"
     end
 
-    test "non-entry-point uses (e.g. :cli) are never checked" do
-      declared = declared(actors: [actor(:dev, [:cli, :email])])
+    test "cross-checks every vocabulary kind, not just the original four" do
+      declared = declared(actors: [actor(:dev, [:oauth])])
       ctx = Validate.context(%{entry_points: [%{kind: :api}]})
 
-      assert {:ok, []} = Validate.validate(declared, ctx)
+      assert {:error, [message]} = Validate.validate(declared, ctx)
+      assert message =~ "actor :dev"
+      assert message =~ ":oauth"
+      assert message =~ "was collected"
     end
 
-    test "skips with a warning when no entry points were collected" do
+    test "rejects an unknown uses: atom when entry points were collected" do
+      declared = declared(actors: [actor(:dev, [:api, :telepathy])])
+      ctx = Validate.context(%{entry_points: [%{kind: :api}]})
+
+      assert {:error, [message]} = Validate.validate(declared, ctx)
+      assert message =~ "actor :dev"
+      assert message =~ ":telepathy"
+      assert message =~ "not a known entry-point kind"
+      assert message =~ ":browser"
+      # the valid :api use produces no error
+      refute message =~ ":api entry point"
+    end
+
+    test "rejects an unknown uses: atom even when no entry points were collected" do
+      declared = declared(actors: [actor(:dev, [:telepathy])])
+      ctx = Validate.context(%{entry_points: []})
+
+      assert {:error, [message]} = Validate.validate(declared, ctx)
+      assert message =~ "actor :dev"
+      assert message =~ ":telepathy"
+      assert message =~ "not a known entry-point kind"
+    end
+
+    test "skips the collected cross-check with a warning when no entry points were collected" do
       declared = declared(actors: [actor(:dev, [:api])])
       ctx = Validate.context(%{entry_points: []})
 
