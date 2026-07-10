@@ -1,0 +1,16 @@
+{
+  "version": 2,
+  "project_name": "arch_lens",
+  "step": 64,
+  "max_worktree_index": 16,
+  "strict_collision_check": true,
+  "env": {
+    "compose_prefix": "arch_lens"
+  },
+  "services": {
+    "ARCH_LENS_DOCS_PORT": 27100
+  },
+  "probes": {
+    "ARCH_LENS_DOCS_PORT": { "kind": "http", "path": "/", "label": "arch_lens generated docs" }
+  }
+}
