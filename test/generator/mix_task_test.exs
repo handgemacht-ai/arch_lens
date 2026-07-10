@@ -39,6 +39,26 @@ defmodule Mix.Tasks.ArchLens.Gen.ArchitectureTest do
     assert Jason.decode!(File.read!(json_path))["schema_version"] == 1
   end
 
+  test "a :router option threads collected entry points into both artifacts", %{
+    path: path,
+    json_path: json_path
+  } do
+    opts = @clean_opts ++ [router: ArchLens.CollectFixtures.Router]
+    assert Task.emit(opts, path, false) == :ok
+
+    kinds =
+      json_path
+      |> File.read!()
+      |> Jason.decode!()
+      |> Map.fetch!("entry_points")
+      |> Enum.map(& &1["kind"])
+      |> Enum.uniq()
+      |> Enum.sort()
+
+    assert kinds == ["api", "browser", "mcp", "oauth", "webhook"]
+    assert File.read!(path) =~ "## Entry points"
+  end
+
   test "--check passes when both committed artifacts match", %{path: path, json_path: json_path} do
     {:ok, %{markdown: markdown, json: json}} = Architecture.render_artifacts(@clean_opts)
     File.write!(path, markdown)

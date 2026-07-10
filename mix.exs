@@ -48,6 +48,11 @@ defmodule ArchLens.MixProject do
       # Oban stays optional: arch_lens must compile and test with it absent, so
       # any Oban-touching code is gated behind Code.ensure_loaded?/1.
       {:oban, "~> 2.18", optional: true},
+      # Phoenix is test-only: the entry-point collector reads a host router via
+      # Phoenix.Router.routes/1, but arch_lens must compile and run with Phoenix
+      # absent (the collector guards on Code.ensure_loaded?/1 and calls through
+      # apply/3). Tests build a minimal fixture router, which needs Phoenix present.
+      {:phoenix, "~> 1.7", only: :test, runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false}
     ]
   end
