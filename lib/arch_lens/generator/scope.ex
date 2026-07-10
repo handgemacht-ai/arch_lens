@@ -23,20 +23,28 @@ defmodule ArchLens.Generator.Scope do
     * `:edges` — recorded edges; defaults to `ArchLens.Edge.Registry.all/0`.
     * `:oban_workers` — Oban workers; defaults to `Scan.oban_workers(app)`.
 
-  The `runtime_components`, `external_systems` and `declared_architecture` fields
-  are seams for the follow-up slices. They default to empty and are collected in
-  the host app's context (via wrapper mix tasks), so `resolve/1` only reads
-  whatever the caller passes for them — it does not scan for them here.
+  The `runtime_components` and `external_systems` fields are seams for the
+  follow-up slices. They default to empty and are collected in the host app's
+  context (via wrapper mix tasks), so `resolve/1` only reads whatever the caller
+  passes for them — it does not scan for them here.
 
-  `entry_points` is the one seam that is wired: pass `:entry_points` directly, or
-  pass `:router` (a host Phoenix router module) and `resolve/1` collects the
-  entry points from it via `ArchLens.Collect.EntryPoints.collect/1`. This mirrors
-  how `:edges` defaults to the recorded registry — an explicit value always wins.
+  `entry_points` is a wired seam: pass `:entry_points` directly, or pass `:router`
+  (a host Phoenix router module) and `resolve/1` collects the entry points from it
+  via `ArchLens.Collect.EntryPoints.collect/1`. This mirrors how `:edges` defaults
+  to the recorded registry — an explicit value always wins.
+
+  `declared_architecture` is the other wired seam: pass `:declared_architecture`
+  directly, or pass `:system` (a module that `use ArchLens.System`) and `resolve/1`
+  reads its actors/externals/contexts, validates them against the already-collected
+  `entry_points`/`external_systems` (`ArchLens.System.Declared`), and puts the
+  validated value on `declared_architecture`. An invalid declaration raises
+  `ArchLens.System.ValidationError` — generation fails rather than emitting a lie.
   """
 
   alias ArchLens.Collect
   alias ArchLens.Edge
   alias ArchLens.Generator.Scan
+  alias ArchLens.System.Declared
   alias Ash.Domain.Info, as: DomainInfo
 
   @enforce_keys [:resources]
@@ -85,6 +93,9 @@ defmodule ArchLens.Generator.Scope do
       |> Keyword.get_lazy(:oban_workers, fn -> Scan.oban_workers(app) end)
       |> sort_modules()
 
+    entry_points = Keyword.get_lazy(opts, :entry_points, fn -> collect_entry_points(opts) end)
+    external_systems = Keyword.get(opts, :external_systems, [])
+
     %__MODULE__{
       app: app,
       domains: domains,
@@ -92,10 +103,19 @@ defmodule ArchLens.Generator.Scope do
       resources: resources,
       edges: edges,
       oban_workers: oban_workers,
-      entry_points: Keyword.get_lazy(opts, :entry_points, fn -> collect_entry_points(opts) end),
+      entry_points: entry_points,
       runtime_components: Keyword.get(opts, :runtime_components, []),
-      external_systems: Keyword.get(opts, :external_systems, []),
-      declared_architecture: Keyword.get(opts, :declared_architecture, [])
+      external_systems: external_systems,
+      declared_architecture:
+        declared_architecture(
+          opts,
+          app,
+          resources,
+          oban_workers,
+          edges,
+          entry_points,
+          external_systems
+        )
     }
   end
 
@@ -103,6 +123,33 @@ defmodule ArchLens.Generator.Scope do
     case Keyword.get(opts, :router) do
       nil -> []
       router -> Collect.EntryPoints.collect(router)
+    end
+  end
+
+  defp declared_architecture(
+         opts,
+         app,
+         resources,
+         oban_workers,
+         edges,
+         entry_points,
+         external_systems
+       ) do
+    case Keyword.get(opts, :system) do
+      nil ->
+        Keyword.get(opts, :declared_architecture, [])
+
+      system ->
+        Declared.resolve!(system, %{
+          app: app,
+          resources: resources,
+          oban_workers: oban_workers,
+          edges: edges,
+          entry_points: entry_points,
+          external_systems: external_systems,
+          vendors: Keyword.get(opts, :vendors),
+          known_modules: Keyword.get(opts, :known_modules)
+        })
     end
   end
 
