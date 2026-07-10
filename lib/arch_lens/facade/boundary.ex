@@ -37,7 +37,7 @@ defmodule ArchLens.Facade.Boundary do
     Facade.put_edge(caller.module, %Edge{
       kind: :http_boundary,
       builder: {caller.module, name},
-      call_site: {caller.module, caller.file, caller.line},
+      call_sites: [{caller.file, caller.line}],
       target: Keyword.get(opts, :target),
       metadata: Map.new(opts)
     })

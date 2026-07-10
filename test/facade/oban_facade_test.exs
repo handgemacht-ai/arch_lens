@@ -31,6 +31,7 @@ defmodule ArchLens.Facade.ObanFacadeTest do
   # async: false — the edge registry and the :oban_module app env are global.
   use ExUnit.Case, async: false
 
+  alias ArchLens.Edge
   alias ArchLens.Edge.Registry
   alias ArchLens.Facade
   alias ArchLens.Facade.Oban, as: ObanFacade
@@ -70,18 +71,18 @@ defmodule ArchLens.Facade.ObanFacadeTest do
              {:ok, {:inserted, {:changeset, %{user_id: 7}}, [priority: 1]}}
   end
 
-  test "an :oban_insert edge is registered keyed by {builder, call_site}" do
-    edges = Facade.register_edges(Enqueue)
+  test "same-changeset oban_insert call sites merge into one :oban_insert edge" do
+    assert [%Edge{} = edge] = Facade.register_edges(Enqueue)
 
-    oban_edges = Enum.filter(edges, &(&1.kind == :oban_insert))
-    assert length(oban_edges) == 2
-    assert Enum.all?(oban_edges, &(&1.builder == {Worker, :new, 1}))
+    assert edge.kind == :oban_insert
+    assert edge.builder == {Worker, :new, 1}
+    assert length(edge.call_sites) == 2
 
-    for edge <- oban_edges do
-      assert {Enqueue, file, line} = edge.call_site
-      assert is_binary(file) and is_integer(line)
-      assert Registry.fetch(edge.builder, edge.call_site) == {:ok, edge}
-    end
+    assert Enum.all?(edge.call_sites, fn {file, line} ->
+             is_binary(file) and is_integer(line)
+           end)
+
+    assert Registry.fetch(Edge.identity(edge)) == {:ok, edge}
   end
 
   test "available?/0 answers without hard-requiring Oban" do

@@ -22,16 +22,16 @@ defmodule ArchLens.Facade.BoundaryFacadeTest do
     :ok
   end
 
-  test "boundary registers an :http_boundary edge keyed by {builder, call_site}" do
+  test "boundary registers an :http_boundary edge keyed by its identity" do
     assert [%Edge{} = edge] = Facade.register_edges(StripeClient)
 
     assert edge.kind == :http_boundary
     assert edge.builder == {StripeClient, :stripe}
-    assert {StripeClient, file, line} = edge.call_site
+    assert [{file, line}] = edge.call_sites
     assert is_binary(file) and is_integer(line)
     assert edge.target == "https://api.stripe.com"
     assert edge.metadata == %{target: "https://api.stripe.com", via: :req}
-    assert Registry.fetch(edge.builder, edge.call_site) == {:ok, edge}
+    assert Registry.fetch(Edge.identity(edge)) == {:ok, edge}
   end
 
   test "boundary is a pure declaration and changes no call behaviour" do
