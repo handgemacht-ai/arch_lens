@@ -5,9 +5,15 @@ defmodule ArchLens.System.Validate do
 
   Three checks, run together so *all* failures are reported at once:
 
-    1. **Actor entry points.** An actor that `uses:` an entry-point surface
-       (`:api`, `:mcp`, `:browser`, `:webhook`) requires a matching collected entry
-       point. Skipped, with a recorded warning, when no entry points were collected.
+    1. **Actor `uses:`.** Two things are enforced. First, *vocabulary*: every atom
+       an actor `uses:` must name a known entry-point kind — the canonical list the
+       generator emits, `ArchLens.Collect.EntryPoints.kinds/0`
+       (`:browser`, `:api`, `:webhook`, `:oauth`, `:mcp`, `:other`). An unknown atom
+       always fails, whether or not entry points were collected. Second, a
+       *collected cross-check*: when entry points were collected, each known kind an
+       actor uses must also appear among them. Only the cross-check is skipped, with
+       a recorded warning, when no entry points were collected — the vocabulary
+       check still runs.
     2. **HTTP externals.** A declared `external via: :http` must match a collected
        external system's target or a dependency vendor. Skipped, with a warning,
        when no external systems were collected.
@@ -18,7 +24,7 @@ defmodule ArchLens.System.Validate do
   always produce the same ordered errors and warnings.
   """
 
-  @entry_point_uses [:api, :browser, :mcp, :webhook]
+  @entry_point_uses ArchLens.Collect.EntryPoints.kinds()
 
   defstruct entry_point_kinds: MapSet.new(),
             entry_points_collected?: false,
@@ -36,7 +42,7 @@ defmodule ArchLens.System.Validate do
           contexts: [map()]
         }
 
-  @doc "The entry-point surfaces that are validated against collected entry points."
+  @doc "The known entry-point kinds an actor may declare in `uses:`."
   @spec entry_point_uses() :: [atom()]
   def entry_point_uses, do: @entry_point_uses
 
@@ -91,9 +97,36 @@ defmodule ArchLens.System.Validate do
     end
   end
 
-  # --- rule (a): actor entry points ---------------------------------------------
+  # --- rule (a): actor uses -----------------------------------------------------
 
-  defp check_actors(acc, actors, %{entry_points_collected?: false}) do
+  defp check_actors(acc, actors, ctx) do
+    acc
+    |> check_actor_vocabulary(actors)
+    |> check_actor_entry_points(actors, ctx)
+  end
+
+  # (a1) Every `uses:` atom must name a known entry-point kind. Always enforced,
+  # whether or not entry points were collected.
+  defp check_actor_vocabulary(acc, actors) do
+    Enum.reduce(actors, acc, fn actor, acc ->
+      actor
+      |> Map.get(:uses, [])
+      |> Enum.reject(&(&1 in @entry_point_uses))
+      |> Enum.reduce(acc, &unknown_use_error(actor, &1, &2))
+    end)
+  end
+
+  defp unknown_use_error(actor, use, acc) do
+    add_error(
+      acc,
+      "actor #{inspect(actor[:name])} declares uses: #{inspect(use)}, which is not a known " <>
+        "entry-point kind (allowed: #{inspect(@entry_point_uses)})."
+    )
+  end
+
+  # (a2) Every known kind an actor uses must have been collected. Skipped, with a
+  # warning, when no entry points were collected.
+  defp check_actor_entry_points(acc, actors, %{entry_points_collected?: false}) do
     if Enum.any?(actors, &uses_entry_point?/1) do
       add_warning(acc, "entry points not collected — skipped actor entry-point validation.")
     else
@@ -101,7 +134,7 @@ defmodule ArchLens.System.Validate do
     end
   end
 
-  defp check_actors(acc, actors, ctx) do
+  defp check_actor_entry_points(acc, actors, ctx) do
     Enum.reduce(actors, acc, &check_actor(&1, &2, ctx))
   end
 
