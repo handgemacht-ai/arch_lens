@@ -22,6 +22,12 @@ defmodule ArchLens.Generator.Scope do
       `Scan.ash_resources(app)`.
     * `:edges` — recorded edges; defaults to `ArchLens.Edge.Registry.all/0`.
     * `:oban_workers` — Oban workers; defaults to `Scan.oban_workers(app)`.
+
+  The `entry_points`, `runtime_components`, `external_systems` and
+  `declared_architecture` fields are seams for the follow-up slices. They default
+  to empty and are collected in the host app's context (via wrapper mix tasks), so
+  `resolve/1` only reads whatever the caller passes for them — it does not scan for
+  them here.
   """
 
   alias ArchLens.Edge
@@ -34,7 +40,11 @@ defmodule ArchLens.Generator.Scope do
             domain_resources: [],
             resources: [],
             edges: [],
-            oban_workers: []
+            oban_workers: [],
+            entry_points: [],
+            runtime_components: [],
+            external_systems: [],
+            declared_architecture: []
 
   @type t :: %__MODULE__{
           app: atom() | nil,
@@ -42,7 +52,11 @@ defmodule ArchLens.Generator.Scope do
           domain_resources: [module()],
           resources: [module()],
           edges: [Edge.t()],
-          oban_workers: [module()]
+          oban_workers: [module()],
+          entry_points: [term()],
+          runtime_components: [term()],
+          external_systems: [term()],
+          declared_architecture: [term()]
         }
 
   @spec resolve(keyword()) :: t()
@@ -72,7 +86,11 @@ defmodule ArchLens.Generator.Scope do
       domain_resources: domain_resources,
       resources: resources,
       edges: edges,
-      oban_workers: oban_workers
+      oban_workers: oban_workers,
+      entry_points: Keyword.get(opts, :entry_points, []),
+      runtime_components: Keyword.get(opts, :runtime_components, []),
+      external_systems: Keyword.get(opts, :external_systems, []),
+      declared_architecture: Keyword.get(opts, :declared_architecture, [])
     }
   end
 

@@ -3,20 +3,22 @@ defmodule Mix.Tasks.ArchLens.Gen.Architecture do
 
   @moduledoc """
   Renders the deterministic architecture/privacy report for the current app and
-  writes it to `docs/architecture.gen.md` (or `--output PATH`).
+  writes both `docs/architecture.gen.md` and its JSON sidecar
+  `docs/architecture.gen.json` (or `--output PATH.md` and its `.json` sibling).
 
   ## Usage
 
-      mix arch_lens.gen.architecture            # write the report
+      mix arch_lens.gen.architecture            # write both artifacts
       mix arch_lens.gen.architecture --check    # fail on drift, write nothing
       mix arch_lens.gen.architecture --output docs/arch.md
 
   ## `--check` mode
 
-  Re-renders the report and compares it byte-for-byte against the committed
-  artifact, exiting non-zero and *naming the artifact* on any drift. This mirrors
-  the `mix ash.codegen --check` / `mix ccc.fixtures.check` idiom and is the
-  completeness/staleness gate a consuming app wires into CI.
+  Re-renders both artifacts and compares each byte-for-byte against its committed
+  file, exiting non-zero and *naming the file* on any drift (of either the Markdown
+  report or the JSON sidecar). This mirrors the `mix ash.codegen --check` /
+  `mix ccc.fixtures.check` idiom and is the completeness/staleness gate a consuming
+  app wires into CI.
 
   Generation *fails* (non-zero) — rather than emitting an incomplete document —
   when any `Ash.Resource` in scope declares neither a `privacy` block nor
@@ -47,22 +49,27 @@ defmodule Mix.Tasks.ArchLens.Gen.Architecture do
   end
 
   @doc false
-  # Render `render_opts`, then either write to `path` or (in `--check` mode)
-  # compare against it. Rendering an undeclared resource, or drift in `--check`,
-  # aborts via `Mix.raise/1` (non-zero exit). Split out so the write/check/raise
-  # glue is exercised with an explicit scope in tests.
+  # Render `render_opts` into both the Markdown report at `path` and its JSON
+  # sidecar (same stem, `.json`), then either write both or (in `--check` mode)
+  # compare both. Rendering an undeclared resource, or drift in either file under
+  # `--check`, aborts via `Mix.raise/1` (non-zero exit). Split out so the
+  # write/check/raise glue is exercised with an explicit scope in tests.
   @spec emit(keyword(), String.t(), boolean()) :: :ok
   def emit(render_opts, path, check?) do
-    markdown =
-      case Architecture.render(render_opts) do
-        {:ok, markdown} -> markdown
+    %{markdown: markdown, json: json} =
+      case Architecture.render_artifacts(render_opts) do
+        {:ok, artifacts} -> artifacts
         {:error, reason} -> Mix.raise(Architecture.format_error(reason))
       end
 
+    json_path = Architecture.json_artifact_for(path)
+
     if check? do
       check(path, markdown)
+      check(json_path, json)
     else
       write(path, markdown)
+      write(json_path, json)
     end
   end
 
