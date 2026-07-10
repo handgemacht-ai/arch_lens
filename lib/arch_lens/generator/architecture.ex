@@ -2,12 +2,14 @@ defmodule ArchLens.Generator.Architecture do
   @moduledoc """
   Deterministic architecture-report generator.
 
-  `render/1` reads the privacy posture of every Ash resource in scope (the union
-  of the consuming app's domain resources and a plain module scan), the recorded
-  architectural edges, and the Oban workers, and renders a byte-stable Markdown
-  document. Running it twice against unchanged code reproduces identical bytes:
-  every collection is sorted by a stable key and the output carries no timestamp,
-  git SHA, or absolute filesystem path.
+  `render_artifacts/1` reads the privacy posture of every Ash resource in scope
+  (the union of the consuming app's domain resources and a plain module scan), the
+  recorded architectural edges, and the Oban workers, folds them into one
+  intermediate model (`ArchLens.Generator.Model.to_map/1`), and renders both a
+  byte-stable Markdown document and a JSON sidecar from that single model. Running
+  it twice against unchanged code reproduces identical bytes: every collection is
+  sorted by a stable key and the output carries no timestamp, git SHA, or absolute
+  filesystem path.
 
   ## Completeness gate
 
@@ -18,40 +20,68 @@ defmodule ArchLens.Generator.Architecture do
 
   ## Staleness gate
 
-  `check/2` compares freshly rendered Markdown against the committed artifact and
+  `check/2` compares freshly rendered content against a committed artifact and
   reports drift (always naming the artifact), mirroring the
   `mix ash.codegen --check` / `mix ccc.fixtures.check` "generated artifact must
-  match commit" idiom.
+  match commit" idiom. The Markdown report and its JSON sidecar are both put under
+  this gate, so `--check` fails when *either* committed file drifts.
 
   The generator is DB-free: it reads only compiled module metadata (source/AST),
   never a database connection.
   """
 
-  alias ArchLens.Generator.{Document, Scope}
+  alias ArchLens.Generator.{Document, Model, Scope}
   alias ArchLens.Privacy.Info
 
   @default_artifact "docs/architecture.gen.md"
+  @default_json_artifact "docs/architecture.gen.json"
 
   @type render_error :: {:undeclared_resources, [module()]}
+  @type artifacts :: %{markdown: String.t(), json: String.t()}
 
-  @doc "The default committed artifact path (repo-relative)."
+  @doc "The default committed Markdown artifact path (repo-relative)."
   @spec artifact() :: String.t()
   def artifact, do: @default_artifact
 
+  @doc "The default committed JSON sidecar path (repo-relative)."
+  @spec json_artifact() :: String.t()
+  def json_artifact, do: @default_json_artifact
+
+  @doc "The JSON sidecar path for a given Markdown artifact path (same stem, `.json`)."
+  @spec json_artifact_for(String.t()) :: String.t()
+  def json_artifact_for(markdown_path), do: Path.rootname(markdown_path) <> ".json"
+
   @doc """
-  Renders the architecture document for `opts` (see `ArchLens.Generator.Scope`).
+  Renders both artifacts for `opts` (see `ArchLens.Generator.Scope`) from one
+  intermediate model (`ArchLens.Generator.Model.to_map/1`), so the Markdown and its
+  JSON sidecar can never disagree.
+
+  Returns `{:ok, %{markdown: ..., json: ...}}` or
+  `{:error, {:undeclared_resources, modules}}` when the completeness gate trips.
+  """
+  @spec render_artifacts(keyword()) :: {:ok, artifacts()} | {:error, render_error()}
+  def render_artifacts(opts \\ []) do
+    scope = Scope.resolve(opts)
+
+    case undeclared(scope.resources) do
+      [] ->
+        model = Model.to_map(scope)
+        {:ok, %{markdown: Document.render(model), json: Model.encode(model)}}
+
+      undeclared ->
+        {:error, {:undeclared_resources, undeclared}}
+    end
+  end
+
+  @doc """
+  Renders the architecture Markdown for `opts` (see `ArchLens.Generator.Scope`).
 
   Returns `{:ok, markdown}` or `{:error, {:undeclared_resources, modules}}` when
   the completeness gate trips.
   """
   @spec render(keyword()) :: {:ok, String.t()} | {:error, render_error()}
   def render(opts \\ []) do
-    scope = Scope.resolve(opts)
-
-    case undeclared(scope.resources) do
-      [] -> {:ok, Document.render(scope)}
-      undeclared -> {:error, {:undeclared_resources, undeclared}}
-    end
+    with {:ok, %{markdown: markdown}} <- render_artifacts(opts), do: {:ok, markdown}
   end
 
   @doc """

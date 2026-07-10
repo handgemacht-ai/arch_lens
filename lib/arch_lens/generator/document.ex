@@ -1,27 +1,31 @@
 defmodule ArchLens.Generator.Document do
   @moduledoc """
-  Renders a resolved `ArchLens.Generator.Scope` to deterministic Markdown.
+  Renders the deterministic model map (`ArchLens.Generator.Model.to_map/1`) to
+  Markdown.
 
-  Determinism is the contract: every collection is already sorted by a stable key
-  in the scope, and this module adds no timestamp, git SHA, or absolute
-  filesystem path. Any path that reaches the output (an edge call-site file) is
-  made repo-relative first. Two runs against unchanged code therefore reproduce
-  byte-identical Markdown.
+  Determinism is the contract: the model already sorts every collection by a stable
+  key and repo-relativises every call-site path, and this module adds no timestamp,
+  git SHA, or absolute path. Two runs against unchanged code reproduce byte-identical
+  Markdown, and — because the JSON sidecar renders from the same model map — the two
+  artifacts can never disagree.
   """
 
-  alias ArchLens.Edge
-  alias ArchLens.Generator.{Retention, Scope}
-  alias ArchLens.Privacy.{Declaration, Info}
+  alias ArchLens.Generator.Sections.{
+    DeclaredArchitecture,
+    EntryPoints,
+    ExternalSystems,
+    RuntimeComponents
+  }
 
-  @doc "Renders `scope` to a Markdown string terminated by a single newline."
-  @spec render(Scope.t()) :: String.t()
-  def render(%Scope{} = scope) do
-    [
-      header(),
-      resources_section(scope),
-      edges_section(scope),
-      oban_section(scope)
-    ]
+  @doc "Renders the model `map` to a Markdown string terminated by a single newline."
+  @spec render(map()) :: String.t()
+  def render(model) when is_map(model) do
+    ([
+       header(),
+       resources_section(model),
+       edges_section(model),
+       oban_section(model)
+     ] ++ optional_sections(model))
     |> Enum.intersperse([""])
     |> List.flatten()
     |> Enum.join("\n")
@@ -36,146 +40,101 @@ defmodule ArchLens.Generator.Document do
     ]
   end
 
-  defp resources_section(%Scope{resources: []}) do
+  defp resources_section(%{resources: []}) do
     ["## Resource privacy inventory", "", "_No Ash resources in scope._"]
   end
 
-  defp resources_section(%Scope{} = scope) do
+  defp resources_section(%{resources: resources}) do
     entries =
-      scope.resources
-      |> Enum.map(&resource_entry(&1, scope))
+      resources
+      |> Enum.map(&resource_entry/1)
       |> Enum.intersperse([""])
       |> List.flatten()
 
     ["## Resource privacy inventory", "" | entries]
   end
 
-  defp resource_entry(resource, %Scope{} = scope) do
+  defp resource_entry(resource) do
     [
-      "### #{module_name(resource)}",
-      "" | posture_lines(resource, scope) ++ provenance_lines(resource, scope)
+      "### #{resource[:module]}",
+      "" | posture_lines(resource[:privacy]) ++ provenance_lines(resource)
     ]
   end
 
-  defp posture_lines(resource, %Scope{} = scope) do
-    case Info.posture(resource) do
-      %Declaration{} = declaration ->
-        [
-          "- Data category: `#{inspect(declaration.data_category)}`",
-          "- Legal basis: `#{inspect(declaration.legal_basis)}`",
-          retention_line(resource, declaration, scope)
-        ]
-
-      :no_personal_data ->
-        ["- No personal data."]
-
-      :undeclared ->
-        # Unreachable in practice: the completeness gate fails generation before
-        # rendering when any resource is undeclared. Rendered defensively.
-        ["- **Undeclared privacy posture.**"]
-    end
-  end
-
-  defp retention_line(resource, %Declaration{retention: retention}, %Scope{edges: edges}) do
-    case Retention.classify(resource, edges) do
-      {:enforced, evidence} ->
-        "- Retention: `#{retention}` — enforced (#{enforcement_evidence(evidence)})"
-
-      {:declared_not_enforced, _evidence} ->
-        "- Retention: `#{retention}` — declared, not enforced"
-
-      {:none, _} ->
-        "- Retention: `#{retention}`"
-    end
-  end
-
-  defp enforcement_evidence(evidence) do
+  defp posture_lines(%{posture: "declared"} = privacy) do
     [
-      evidence[:field] && "field `#{evidence[:field]}`",
-      evidence[:cleanup] && "cleanup `#{module_name(evidence[:cleanup])}`"
+      "- Data category: `#{inspect(privacy[:data_category])}`",
+      "- Legal basis: `#{inspect(privacy[:legal_basis])}`",
+      retention_line(privacy[:retention])
+    ]
+  end
+
+  defp posture_lines(%{posture: "no_personal_data"}), do: ["- No personal data."]
+  defp posture_lines(%{posture: "undeclared"}), do: ["- **Undeclared privacy posture.**"]
+
+  defp retention_line(%{enforcement: "enforced", policy: policy} = retention) do
+    "- Retention: `#{policy}` — enforced (#{enforcement_evidence(retention)})"
+  end
+
+  defp retention_line(%{enforcement: "declared_not_enforced", policy: policy}) do
+    "- Retention: `#{policy}` — declared, not enforced"
+  end
+
+  defp retention_line(%{policy: policy}), do: "- Retention: `#{policy}`"
+
+  defp enforcement_evidence(retention) do
+    [
+      retention[:field] && "field `#{retention[:field]}`",
+      retention[:cleanup] && "cleanup `#{retention[:cleanup]}`"
     ]
     |> Enum.reject(&is_nil/1)
     |> Enum.join(", ")
   end
 
-  defp provenance_lines(resource, %Scope{domain_resources: domain_resources}) do
-    if resource in domain_resources do
-      []
-    else
-      ["- Discovered via module scan (no registered domain)."]
-    end
+  defp provenance_lines(%{discovered_via_scan: true}) do
+    ["- Discovered via module scan (no registered domain)."]
   end
 
-  defp edges_section(%Scope{edges: []}) do
+  defp provenance_lines(_resource), do: []
+
+  defp edges_section(%{edges: []}) do
     ["## Architectural edges", "", "_No architectural edges recorded._"]
   end
 
-  defp edges_section(%Scope{edges: edges}) do
-    rows =
-      edges
-      |> Enum.sort_by(&edge_sort_key/1)
-      |> Enum.map(&edge_line/1)
-
-    ["## Architectural edges", "" | rows]
+  defp edges_section(%{edges: edges}) do
+    ["## Architectural edges", "" | Enum.map(edges, &edge_line/1)]
   end
 
-  defp edge_line(%Edge{} = edge) do
-    "- `#{edge.kind}` `#{module_name(edge.builder)}` → #{format_target(edge.target)} (#{format_call_site(edge.call_site)})"
+  defp edge_line(edge) do
+    "- `#{edge[:kind]}` `#{edge[:builder]}` → #{format_target(edge[:target])} (#{format_call_sites(edge[:call_sites])})"
   end
 
-  defp edge_sort_key(%Edge{} = edge) do
-    {inspect(edge.builder), inspect(edge.call_site), Atom.to_string(edge.kind)}
+  defp format_target(nil), do: "_(none)_"
+  defp format_target(target), do: "`#{target}`"
+
+  defp format_call_sites(sites) do
+    sites
+    |> Enum.map(fn %{file: file, line: line} -> "#{file}:#{line}" end)
+    |> Enum.join(", ")
   end
 
-  defp oban_section(%Scope{oban_workers: []}) do
+  defp oban_section(%{oban_workers: []}) do
     ["## Oban jobs", "", "_No Oban jobs registered._"]
   end
 
-  defp oban_section(%Scope{oban_workers: workers}) do
-    rows = Enum.map(workers, &"- `#{module_name(&1)}`")
-    ["## Oban jobs", "" | rows]
+  defp oban_section(%{oban_workers: workers}) do
+    ["## Oban jobs", "" | Enum.map(workers, &"- `#{&1[:module]}`")]
   end
 
-  defp format_target(target) when is_binary(target), do: "`#{target}`"
-
-  defp format_target(target) when is_atom(target) and not is_nil(target),
-    do: "`#{module_name(target)}`"
-
-  defp format_target(nil), do: "_(none)_"
-  defp format_target(target), do: "`#{inspect(target)}`"
-
-  defp format_call_site({module, file, line})
-       when is_atom(module) and is_binary(file) and is_integer(line) do
-    "at `#{relativize(file)}:#{line}`"
+  defp optional_sections(model) do
+    [
+      EntryPoints.render(model[:entry_points]),
+      RuntimeComponents.render(model[:runtime_components]),
+      ExternalSystems.render(model[:external_systems]),
+      DeclaredArchitecture.render(model[:declared_architecture])
+    ]
+    |> Enum.reject(&(&1 == []))
   end
-
-  defp format_call_site({module, function, arity})
-       when is_atom(module) and is_atom(function) and is_integer(arity) do
-    "at `#{module_name(module)}.#{function}/#{arity}`"
-  end
-
-  defp format_call_site(other), do: "at `#{inspect(other)}`"
-
-  # Repo-relative-ise a path so no absolute filesystem path ever reaches the
-  # rendered document. Falls back to the basename if the path is not under the
-  # project root.
-  defp relativize(path) do
-    relative = Path.relative_to(path, File.cwd!())
-
-    case Path.type(relative) do
-      :absolute -> Path.basename(relative)
-      _ -> relative
-    end
-  end
-
-  defp module_name(module) when is_atom(module) do
-    case Atom.to_string(module) do
-      "Elixir." <> rest -> rest
-      other -> other
-    end
-  end
-
-  defp module_name(other), do: inspect(other)
 
   defp ensure_trailing_newline(string) do
     String.trim_trailing(string, "\n") <> "\n"
