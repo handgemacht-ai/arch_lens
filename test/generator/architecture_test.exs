@@ -115,14 +115,14 @@ defmodule ArchLens.GenFixtures do
       %Edge{
         kind: :oban_insert,
         builder: ArchLens.GenFixtures.PurgeContacts,
-        call_site: {ArchLens.GenFixtures.Contact, "lib/gen_fixtures/contact.ex", 12},
+        call_sites: [{"lib/gen_fixtures/contact.ex", 12}],
         target: ArchLens.GenFixtures.PurgeContacts,
         metadata: %{retention_cleanup_for: ArchLens.GenFixtures.Contact}
       },
       %Edge{
         kind: :topic,
         builder: ArchLens.GenFixtures.Topics,
-        call_site: {ArchLens.GenFixtures.Event, "lib/gen_fixtures/event.ex", 7},
+        call_sites: [{"lib/gen_fixtures/event.ex", 7}],
         target: "gen_fixtures:events"
       }
     ]

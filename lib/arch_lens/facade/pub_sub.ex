@@ -71,7 +71,7 @@ defmodule ArchLens.Facade.PubSub do
     Facade.put_edge(caller.module, %Edge{
       kind: :topic,
       builder: Builder.from_call(topic_ast, caller),
-      call_site: {caller.module, caller.file, caller.line},
+      call_sites: [{caller.file, caller.line}],
       target: Macro.to_string(topic_ast)
     })
   end

@@ -89,7 +89,7 @@ defmodule ArchLens.Facade.Oban do
     Facade.put_edge(caller.module, %Edge{
       kind: :oban_insert,
       builder: Builder.from_call(changeset_ast, caller),
-      call_site: {caller.module, caller.file, caller.line},
+      call_sites: [{caller.file, caller.line}],
       target: Macro.to_string(changeset_ast)
     })
   end
