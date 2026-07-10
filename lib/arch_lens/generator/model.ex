@@ -31,6 +31,7 @@ defmodule ArchLens.Generator.Model do
   }
 
   alias ArchLens.Privacy.{Declaration, Info}
+  alias ArchLens.System.ExternalMerge
 
   @schema_version 1
 
@@ -48,10 +49,17 @@ defmodule ArchLens.Generator.Model do
       oban_workers: Enum.map(scope.oban_workers, &oban_worker_map/1),
       entry_points: EntryPoints.to_json(scope.entry_points),
       runtime_components: RuntimeComponents.to_json(scope.runtime_components),
-      external_systems: ExternalSystems.to_json(scope.external_systems),
+      external_systems: ExternalSystems.to_json(external_entries(scope)),
       declared_architecture: DeclaredArchitecture.to_json(scope.declared_architecture)
     }
   end
+
+  defp external_entries(%Scope{external_systems: collected, declared_architecture: declared}) do
+    ExternalMerge.merge(collected, declared_externals(declared))
+  end
+
+  defp declared_externals(%{externals: externals}) when is_list(externals), do: externals
+  defp declared_externals(_declared), do: []
 
   @doc "The deterministic JSON string for `scope` (via `to_map/1`)."
   @spec to_json(Scope.t()) :: String.t()

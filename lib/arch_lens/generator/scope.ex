@@ -28,10 +28,18 @@ defmodule ArchLens.Generator.Scope do
   to empty and are collected in the host app's context (via wrapper mix tasks), so
   `resolve/1` only reads whatever the caller passes for them — it does not scan for
   them here.
+
+  Passing `:system` (a module that `use ArchLens.System`) is the single seam for
+  the *declared architecture*: `resolve/1` reads its actors/externals/contexts,
+  validates them against the already-collected `entry_points`/`external_systems`
+  (`ArchLens.System.Declared`), and puts the validated value on
+  `declared_architecture`. An invalid declaration raises
+  `ArchLens.System.ValidationError` — generation fails rather than emitting a lie.
   """
 
   alias ArchLens.Edge
   alias ArchLens.Generator.Scan
+  alias ArchLens.System.Declared
   alias Ash.Domain.Info, as: DomainInfo
 
   @enforce_keys [:resources]
@@ -80,6 +88,9 @@ defmodule ArchLens.Generator.Scope do
       |> Keyword.get_lazy(:oban_workers, fn -> Scan.oban_workers(app) end)
       |> sort_modules()
 
+    entry_points = Keyword.get(opts, :entry_points, [])
+    external_systems = Keyword.get(opts, :external_systems, [])
+
     %__MODULE__{
       app: app,
       domains: domains,
@@ -87,11 +98,47 @@ defmodule ArchLens.Generator.Scope do
       resources: resources,
       edges: edges,
       oban_workers: oban_workers,
-      entry_points: Keyword.get(opts, :entry_points, []),
+      entry_points: entry_points,
       runtime_components: Keyword.get(opts, :runtime_components, []),
-      external_systems: Keyword.get(opts, :external_systems, []),
-      declared_architecture: Keyword.get(opts, :declared_architecture, [])
+      external_systems: external_systems,
+      declared_architecture:
+        declared_architecture(
+          opts,
+          app,
+          resources,
+          oban_workers,
+          edges,
+          entry_points,
+          external_systems
+        )
     }
+  end
+
+  defp declared_architecture(
+         opts,
+         app,
+         resources,
+         oban_workers,
+         edges,
+         entry_points,
+         external_systems
+       ) do
+    case Keyword.get(opts, :system) do
+      nil ->
+        Keyword.get(opts, :declared_architecture, [])
+
+      system ->
+        Declared.resolve!(system, %{
+          app: app,
+          resources: resources,
+          oban_workers: oban_workers,
+          edges: edges,
+          entry_points: entry_points,
+          external_systems: external_systems,
+          vendors: Keyword.get(opts, :vendors),
+          known_modules: Keyword.get(opts, :known_modules)
+        })
+    end
   end
 
   defp ash_domains(nil), do: []
