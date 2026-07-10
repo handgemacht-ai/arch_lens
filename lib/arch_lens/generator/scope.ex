@@ -23,13 +23,18 @@ defmodule ArchLens.Generator.Scope do
     * `:edges` — recorded edges; defaults to `ArchLens.Edge.Registry.all/0`.
     * `:oban_workers` — Oban workers; defaults to `Scan.oban_workers(app)`.
 
-  The `entry_points`, `runtime_components`, `external_systems` and
-  `declared_architecture` fields are seams for the follow-up slices. They default
-  to empty and are collected in the host app's context (via wrapper mix tasks), so
-  `resolve/1` only reads whatever the caller passes for them — it does not scan for
-  them here.
+  The `runtime_components`, `external_systems` and `declared_architecture` fields
+  are seams for the follow-up slices. They default to empty and are collected in
+  the host app's context (via wrapper mix tasks), so `resolve/1` only reads
+  whatever the caller passes for them — it does not scan for them here.
+
+  `entry_points` is the one seam that is wired: pass `:entry_points` directly, or
+  pass `:router` (a host Phoenix router module) and `resolve/1` collects the
+  entry points from it via `ArchLens.Collect.EntryPoints.collect/1`. This mirrors
+  how `:edges` defaults to the recorded registry — an explicit value always wins.
   """
 
+  alias ArchLens.Collect
   alias ArchLens.Edge
   alias ArchLens.Generator.Scan
   alias Ash.Domain.Info, as: DomainInfo
@@ -87,11 +92,18 @@ defmodule ArchLens.Generator.Scope do
       resources: resources,
       edges: edges,
       oban_workers: oban_workers,
-      entry_points: Keyword.get(opts, :entry_points, []),
+      entry_points: Keyword.get_lazy(opts, :entry_points, fn -> collect_entry_points(opts) end),
       runtime_components: Keyword.get(opts, :runtime_components, []),
       external_systems: Keyword.get(opts, :external_systems, []),
       declared_architecture: Keyword.get(opts, :declared_architecture, [])
     }
+  end
+
+  defp collect_entry_points(opts) do
+    case Keyword.get(opts, :router) do
+      nil -> []
+      router -> Collect.EntryPoints.collect(router)
+    end
   end
 
   defp ash_domains(nil), do: []
