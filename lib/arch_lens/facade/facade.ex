@@ -12,8 +12,8 @@ defmodule ArchLens.Facade do
 
   Every facade macro is a *thin* wrapper: the runtime code it emits is
   byte-identical to the equivalent raw call. The only extra thing a facade does is
-  record one `ArchLens.Edge` — keyed by `{builder, call_site}` — so the edge
-  inventory (see `ArchLens.Edge.Registry`) can see the boundary crossing.
+  record one `ArchLens.Edge` per call site — merged by its semantic identity — so
+  the edge inventory (see `ArchLens.Edge.Registry`) can see the boundary crossing.
 
   Collection works in two layers:
 
@@ -21,8 +21,8 @@ defmodule ArchLens.Facade do
       `@arch_lens_edges` module attribute, exposed after compilation as
       `__arch_lens_edges__/0`;
     * after the module compiles, `__after_compile__/2` registers those edges into
-      `ArchLens.Edge.Registry`, so an edge appears in the registry keyed by
-      `{builder, call_site}` as soon as a facade call site compiles.
+      `ArchLens.Edge.Registry`, so an edge appears in the registry — merged with
+      any same-identity edge — as soon as a facade call site compiles.
 
   `register_edges/1` re-runs registration on demand (useful for tests and for the
   generator, which resets the registry before re-collecting).
@@ -86,18 +86,23 @@ defmodule ArchLens.Facade do
 
   @doc """
   Register every edge that `module` declared via facade macros into
-  `ArchLens.Edge.Registry`.
+  `ArchLens.Edge.Registry`, merging call sites that share a semantic identity.
 
-  Returns the list of registered edges. Registration is deduplicated on the
-  `{builder, call_site}` key, so calling this twice is idempotent.
+  Returns the distinct merged edges for the module (one per
+  `ArchLens.Edge.identity/1`), so calling this twice is idempotent.
   """
   @spec register_edges(module()) :: [Edge.t()]
   def register_edges(module) do
-    module
-    |> edges()
-    |> Enum.map(fn %Edge{} = edge ->
-      {:ok, registered} = Registry.register(edge)
-      registered
+    declared = edges(module)
+
+    Enum.each(declared, fn %Edge{} = edge -> {:ok, _merged} = Registry.register(edge) end)
+
+    declared
+    |> Enum.map(&Edge.identity/1)
+    |> Enum.uniq()
+    |> Enum.map(fn identity ->
+      {:ok, edge} = Registry.fetch(identity)
+      edge
     end)
   end
 

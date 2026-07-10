@@ -68,19 +68,20 @@ defmodule ArchLens.Facade.PubSubFacadeTest do
     assert_receive {:hello, 1}
   end
 
-  test "a topic edge is registered keyed by {builder, call_site} for each facade call site" do
-    edges = Facade.register_edges(Events)
+  test "same-topic broadcast and subscribe merge into one edge carrying both call sites" do
+    assert [%Edge{} = edge] = Facade.register_edges(Events)
 
-    assert length(edges) == 2
-    assert Enum.all?(edges, &(&1.kind == :topic))
-    assert Enum.all?(edges, &(&1.builder == {Topics, :org, 1}))
+    assert edge.kind == :topic
+    assert edge.builder == {Topics, :org, 1}
+    assert edge.target == "Topics.org(org_id)"
 
-    for %Edge{} = edge <- edges do
-      assert {Events, file, line} = edge.call_site
-      assert is_binary(file) and is_integer(line)
-      assert Registry.fetch(edge.builder, edge.call_site) == {:ok, edge}
-    end
+    assert length(edge.call_sites) == 2
 
-    assert MapSet.new(Registry.all()) == MapSet.new(edges)
+    assert Enum.all?(edge.call_sites, fn {file, line} ->
+             is_binary(file) and is_integer(line)
+           end)
+
+    assert Registry.fetch(Edge.identity(edge)) == {:ok, edge}
+    assert Registry.all() == [edge]
   end
 end
