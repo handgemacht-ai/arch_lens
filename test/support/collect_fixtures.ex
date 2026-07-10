@@ -1,13 +1,43 @@
 defmodule ArchLens.CollectFixtures do
   @moduledoc """
-  Fixtures for `ArchLens.Collect.EntryPoints`: a minimal real Phoenix router
-  covering all five entry-point kinds (browser, api, webhook, oauth, mcp) and the
-  dummy controllers/plug it routes to.
+  Shared fixtures for the `ArchLens.Collect.*` tests.
 
-  Lives under `test/support` (rather than inline in a `_test.exs`) so both the
-  collector tests and the mix-task tests can read the same router without ordering
-  dependencies between test files.
+  Two families live here:
+
+    * A minimal real Phoenix router (`Router`) covering all five entry-point kinds
+      (browser, api, webhook, oauth, mcp) and the dummy controllers/plug it routes
+      to, for `ArchLens.Collect.EntryPoints`.
+    * Plain (non-Ash) modules whose names drive the runtime-component classifier:
+      `PgRepo` exposes `__adapter__/0` (an Ecto-repo shape), `Endpoint`/`Telemetry`
+      match the name-based classes, and `TaskSup`/`Custom` stand in for a
+      supervised task supervisor and an unclassified process.
+
+  Everything lives under `test/support` (rather than inline in a `_test.exs`) so
+  the collector tests, the integration tests, and the mix-task tests can read the
+  same fixtures without ordering dependencies between test files. The plain
+  modules stay out of the domain/Oban scans by being ordinary modules.
   """
+
+  defmodule PgRepo do
+    @moduledoc false
+    def __adapter__, do: Ecto.Adapters.Postgres
+  end
+
+  defmodule Endpoint do
+    @moduledoc false
+  end
+
+  defmodule Telemetry do
+    @moduledoc false
+  end
+
+  defmodule TaskSup do
+    @moduledoc false
+  end
+
+  defmodule Custom do
+    @moduledoc false
+  end
 end
 
 defmodule ArchLens.CollectFixtures.PageController do
