@@ -7,6 +7,15 @@ defmodule ArchLens.Collect.ExternalsTest do
 
   defp swoosh(adapter), do: Module.concat(["Swoosh", "Adapters", adapter])
 
+  defp write_config(name, contents) do
+    dir = Path.join(System.tmp_dir!(), "arch_lens_cfg_#{System.unique_integer([:positive])}")
+    File.mkdir_p!(dir)
+    on_exit(fn -> File.rm_rf(dir) end)
+    path = Path.join(dir, name)
+    File.write!(path, contents)
+    path
+  end
+
   defp boundary(target, name \\ :vendor) do
     %Edge{
       kind: :http_boundary,
@@ -50,6 +59,21 @@ defmodule ArchLens.Collect.ExternalsTest do
     test "an unmapped dependency contributes no external system" do
       assert Externals.dep_vendors(deps: [:phoenix, :jason]) == []
     end
+
+    test "the default scan reads DIRECT deps only, not the transitive closure" do
+      scanned = Externals.scanned_dep_names()
+      direct = Mix.Project.config()[:deps] |> Enum.map(&elem(&1, 0))
+      closure = Mix.Project.deps_apps()
+
+      assert Enum.sort(scanned) == Enum.sort(direct)
+
+      # A vendor is a party the app itself chose to talk to; a transitive-only dep
+      # (present in the closure but not declared directly) must never be scanned,
+      # or it could fabricate an external system the app never opted into.
+      transitive_only = closure -- direct
+      assert transitive_only != []
+      refute Enum.any?(transitive_only, &(&1 in scanned))
+    end
   end
 
   describe "swoosh_vendors/1" do
@@ -66,11 +90,50 @@ defmodule ArchLens.Collect.ExternalsTest do
       assert ses.evidence == [%{type: "swoosh_adapter", value: "Swoosh.Adapters.AmazonSES"}]
     end
 
-    test "discovers the configured mailer adapter from the app config" do
+    test "discovers the configured mailer adapter from live app config as a fallback" do
       Application.put_env(:arch_lens, :test_mailer, adapter: swoosh("Mailgun"))
       on_exit(fn -> Application.delete_env(:arch_lens, :test_mailer) end)
 
-      assert Enum.any?(Externals.swoosh_vendors(otp_app: :arch_lens), &(&1.vendor == "Mailgun"))
+      mailgun =
+        Enum.find(Externals.swoosh_vendors(otp_app: :arch_lens), &(&1.vendor == "Mailgun"))
+
+      assert mailgun
+      assert [%{type: "swoosh_adapter", source: "runtime config"}] = mailgun.evidence
+    end
+
+    test "reads the prod mailer adapter from config files, independent of the live config" do
+      # The dev/CI reality: live config carries only a Local (non-external) adapter,
+      # yet the committed prod config names the real mailer. The old live-only read
+      # silently omitted it; reading the config file makes discovery deterministic.
+      Application.put_env(:arch_lens, :test_mailer, adapter: swoosh("Local"))
+      on_exit(fn -> Application.delete_env(:arch_lens, :test_mailer) end)
+
+      config_path =
+        write_config("prod.exs", """
+        import Config
+        config :arch_lens, ArchLens.TestMailer, adapter: Swoosh.Adapters.Mailgun
+        """)
+
+      elements = Externals.swoosh_vendors(otp_app: :arch_lens, config_path: config_path)
+
+      assert mailgun = Enum.find(elements, &(&1.vendor == "Mailgun"))
+      assert [evidence] = mailgun.evidence
+      assert evidence.type == "swoosh_adapter"
+      assert evidence.value == "Swoosh.Adapters.Mailgun"
+      assert evidence.source =~ "prod.exs"
+    end
+
+    test "emits no external mailer when only Local/Test adapters exist anywhere" do
+      Application.put_env(:arch_lens, :test_mailer, adapter: swoosh("Test"))
+      on_exit(fn -> Application.delete_env(:arch_lens, :test_mailer) end)
+
+      config_path =
+        write_config("prod_local.exs", """
+        import Config
+        config :arch_lens, ArchLens.TestMailer, adapter: Swoosh.Adapters.Local
+        """)
+
+      assert Externals.swoosh_vendors(otp_app: :arch_lens, config_path: config_path) == []
     end
   end
 

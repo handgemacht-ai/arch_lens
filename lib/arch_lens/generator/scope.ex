@@ -147,7 +147,6 @@ defmodule ArchLens.Generator.Scope do
           edges: edges,
           entry_points: entry_points,
           external_systems: external_systems,
-          vendors: Keyword.get(opts, :vendors),
           known_modules: Keyword.get(opts, :known_modules)
         })
     end

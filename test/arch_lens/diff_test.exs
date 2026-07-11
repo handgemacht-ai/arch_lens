@@ -54,6 +54,20 @@ defmodule ArchLens.DiffTest do
     }
   end
 
+  defp actor(name, does, uses) do
+    %{"name" => name, "does" => does, "uses" => uses, "source" => "declared"}
+  end
+
+  defp declared_context(name, does, modules) do
+    %{"name" => name, "does" => does, "modules" => modules, "source" => "declared"}
+  end
+
+  # The real structured declared_architecture shape produced by
+  # ArchLens.System.Declared / DeclaredArchitecture.to_json: a MAP, not a list.
+  defp declared_arch(actors, contexts) do
+    %{"actors" => actors, "contexts" => contexts, "warnings" => []}
+  end
+
   defp ids(deltas), do: Enum.map(deltas, & &1.id)
 
   defp find(deltas, id), do: Enum.find(deltas, &(&1.id == id))
@@ -332,6 +346,74 @@ defmodule ArchLens.DiffTest do
       changed = find(Diff.compute(atom_candidate, atom_baseline).changed, "res:A")
 
       assert %{field: "privacy.data_category", before: "biometric", after: "session"} in changed.changes
+    end
+  end
+
+  # --- declared architecture (structured map, not a list) -----------------
+
+  describe "declared_architecture actors and contexts are diffed" do
+    test "declared actors and contexts partition into added / removed / changed by stable id" do
+      baseline =
+        model(%{
+          "declared_architecture" =>
+            declared_arch(
+              [actor("developer", "captures annotations", ["browser"])],
+              [declared_context("accounts", "users", "MyApp.Accounts")]
+            )
+        })
+
+      candidate =
+        model(%{
+          "declared_architecture" =>
+            declared_arch(
+              [
+                actor("developer", "captures and triages annotations", ["browser"]),
+                actor("admin", "manages workspaces", ["browser"])
+              ],
+              []
+            )
+        })
+
+      result = Diff.compute(baseline, candidate)
+
+      assert ids(result.added) == ["decl:actor:admin"]
+      assert ids(result.removed) == ["decl:context:accounts"]
+      assert ids(result.changed) == ["decl:actor:developer"]
+
+      changed = find(result.changed, "decl:actor:developer")
+
+      assert %{
+               field: "does",
+               before: "captures annotations",
+               after: "captures and triages annotations"
+             } in changed.changes
+    end
+
+    test "nil baseline reports declared actors and contexts as added" do
+      candidate =
+        model(%{
+          "declared_architecture" =>
+            declared_arch(
+              [actor("developer", "captures annotations", ["browser"])],
+              [declared_context("accounts", "users", "MyApp.Accounts")]
+            )
+        })
+
+      result = Diff.compute(nil, candidate)
+
+      assert "decl:actor:developer" in ids(result.added)
+      assert "decl:context:accounts" in ids(result.added)
+    end
+
+    test "an empty structured declared_architecture contributes no deltas" do
+      baseline = model(%{"declared_architecture" => declared_arch([], [])})
+      candidate = model(%{"declared_architecture" => declared_arch([], [])})
+
+      result = Diff.compute(baseline, candidate)
+
+      assert result.added == []
+      assert result.removed == []
+      assert result.changed == []
     end
   end
 

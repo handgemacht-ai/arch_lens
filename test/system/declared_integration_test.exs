@@ -23,6 +23,7 @@ defmodule ArchLens.System.DeclaredIntegrationTest do
   # async: false — resolves scopes and loads modules; keep serialized for determinism.
   use ExUnit.Case, async: false
 
+  alias ArchLens.Collect.Externals
   alias ArchLens.Generator.{Document, Model, Scope}
   alias ArchLens.System.{Declared, ValidationError}
   alias ArchLens.SystemIntegrationFixtures.App
@@ -33,7 +34,8 @@ defmodule ArchLens.System.DeclaredIntegrationTest do
       %{kind: :mcp, label: "MCP"},
       %{kind: :browser, label: "widget"}
     ],
-    external_systems: [%{target: "https://api.stripe.com", label: "stripe boundary", via: :http}],
+    # Real Collect.Externals output: an id/vendor + evidence element, no :target key.
+    external_systems: Externals.collect(deps: [:stripity_stripe]),
     known_modules: ["ArchLens.SystemIntegrationFixtures.Accounts.User"]
   ]
 
@@ -65,7 +67,7 @@ defmodule ArchLens.System.DeclaredIntegrationTest do
     test "raises with every failing check when declarations do not match" do
       inputs = %{
         entry_points: [%{kind: :api}],
-        external_systems: [%{target: "https://elsewhere.test"}],
+        external_systems: Externals.collect(deps: [:sentry]),
         known_modules: ["Some.Other.Module"]
       }
 
@@ -86,7 +88,7 @@ defmodule ArchLens.System.DeclaredIntegrationTest do
 
     test "raises when the declared architecture is invalid" do
       assert_raise ValidationError, fn ->
-        Scope.resolve(scope_opts(external_systems: [%{target: "https://elsewhere.test"}]))
+        Scope.resolve(scope_opts(external_systems: Externals.collect(deps: [:sentry])))
       end
     end
   end

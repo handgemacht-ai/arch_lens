@@ -14,9 +14,14 @@ defmodule ArchLens.System.Validate do
        actor uses must also appear among them. Only the cross-check is skipped, with
        a recorded warning, when no entry points were collected — the vocabulary
        check still runs.
-    2. **HTTP externals.** A declared `external via: :http` must match a collected
-       external system's target or a dependency vendor. Skipped, with a warning,
-       when no external systems were collected.
+    2. **HTTP externals.** A declared `external via: :http` must corroborate against
+       something the collector actually found — matched the same way
+       `ArchLens.System.ExternalMerge` matches: the declared external's stable id
+       (`external:<slug(name)>`) equals a collected external system's id/vendor slug,
+       *or* the declared target's host equals a host in a collected system's HTTP
+       boundary evidence. A bare name collision with an arbitrary dependency app is
+       **not** enough. Skipped, with a warning, when no external systems were
+       collected.
     3. **Context modules.** A context's `modules:` prefix must name at least one
        real module. Skipped, with a warning, when no module list is available.
 
@@ -28,9 +33,9 @@ defmodule ArchLens.System.Validate do
 
   defstruct entry_point_kinds: MapSet.new(),
             entry_points_collected?: false,
+            external_ids: MapSet.new(),
             external_targets: MapSet.new(),
             externals_collected?: false,
-            vendors: MapSet.new(),
             known_modules: MapSet.new(),
             modules_known?: false
 
@@ -49,14 +54,14 @@ defmodule ArchLens.System.Validate do
   @doc """
   Build a validation context from raw collected inputs.
 
-  Recognised keys: `:entry_points`, `:external_systems`, `:vendors`,
+  Recognised keys: `:entry_points`, `:external_systems` (the real
+  `ArchLens.Collect.Externals` element shape — `%{id, vendor, evidence, …}`),
   `:known_modules`.
   """
   @spec context(map()) :: t()
   def context(inputs) when is_map(inputs) do
     entry_points = Map.get(inputs, :entry_points) || []
     externals = Map.get(inputs, :external_systems) || []
-    vendors = Map.get(inputs, :vendors) || []
     known = Map.get(inputs, :known_modules) || []
 
     %__MODULE__{
@@ -64,13 +69,9 @@ defmodule ArchLens.System.Validate do
       entry_point_kinds:
         entry_points |> Enum.map(&read(&1, :kind)) |> reject_nil() |> string_set(),
       externals_collected?: externals != [],
-      external_targets:
-        externals
-        |> Enum.map(&read(&1, :target))
-        |> reject_nil()
-        |> Enum.map(&normalize_target/1)
-        |> MapSet.new(),
-      vendors: string_set(vendors),
+      external_ids:
+        externals |> Enum.map(&collected_external_id/1) |> reject_nil() |> MapSet.new(),
+      external_targets: externals |> Enum.flat_map(&collected_target_hosts/1) |> MapSet.new(),
       known_modules: MapSet.new(known, &to_string/1),
       modules_known?: known != []
     }
@@ -184,16 +185,50 @@ defmodule ArchLens.System.Validate do
       add_error(
         acc,
         "external #{inspect(external[:name])} (via :http, target #{inspect(external[:target])}) " <>
-          "matches no collected external system or dependency vendor."
+          "matches no collected external system or HTTP boundary."
       )
     end
   end
 
+  # Matched the same way ArchLens.System.ExternalMerge collapses declared and
+  # collected externals: by the shared stable id (`external:<slug(name/vendor)>`),
+  # or by the declared target host appearing in a collected system's HTTP boundary
+  # evidence. Deliberately no raw dependency-name match — a name that merely
+  # collides with some app in the OTP closure must not corroborate egress.
   defp external_matched?(external, ctx) do
-    target = normalize_target(external[:target])
+    id = "external:" <> slug(external[:name])
 
-    MapSet.member?(ctx.external_targets, target) or
-      MapSet.member?(ctx.vendors, to_string(external[:name]))
+    MapSet.member?(ctx.external_ids, id) or
+      MapSet.member?(ctx.external_targets, target_host(external[:target]))
+  end
+
+  # The stable id a collected external system carries, mirroring
+  # ArchLens.System.ExternalMerge and ArchLens.Collect.Externals: an explicit `:id`,
+  # else `external:<slug(vendor | label | name)>`. `nil` when nothing identifies it.
+  defp collected_external_id(entry) do
+    case read(entry, :id) do
+      nil ->
+        case read(entry, :vendor) || read(entry, :label) || read(entry, :name) do
+          nil -> nil
+          base -> "external:" <> slug(base)
+        end
+
+      id ->
+        to_string(id)
+    end
+  end
+
+  # Target hosts a collected external system was actually seen talking to: the value
+  # of each `http_boundary` evidence entry, canonicalised to a host.
+  defp collected_target_hosts(entry) do
+    entry
+    |> read(:evidence)
+    |> List.wrap()
+    |> Enum.filter(fn ev -> is_map(ev) and read(ev, :type) == "http_boundary" end)
+    |> Enum.map(&read(&1, :value))
+    |> reject_nil()
+    |> Enum.map(&target_host/1)
+    |> Enum.reject(&(&1 == ""))
   end
 
   # --- rule (c): context modules ------------------------------------------------
@@ -246,8 +281,26 @@ defmodule ArchLens.System.Validate do
 
   defp string_set(values), do: MapSet.new(values, &to_string/1)
 
-  defp normalize_target(nil), do: ""
-  defp normalize_target(target), do: target |> to_string() |> String.trim_trailing("/")
+  # Mirrors ArchLens.Collect.Externals / ExternalMerge slugging so a declared
+  # external's id lines up with the collected external system's id.
+  defp slug(value) do
+    value
+    |> to_string()
+    |> String.downcase()
+    |> String.replace(~r/[^a-z0-9]+/, "-")
+    |> String.trim("-")
+  end
+
+  defp target_host(nil), do: ""
+
+  defp target_host(target) do
+    value = to_string(target)
+
+    case URI.parse(value) do
+      %URI{host: host} when is_binary(host) and host != "" -> String.downcase(host)
+      _ -> value |> String.trim() |> String.trim_trailing("/") |> String.downcase()
+    end
+  end
 
   defp present?(nil), do: false
   defp present?(""), do: false
