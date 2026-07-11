@@ -11,6 +11,7 @@ defmodule ArchLens.Generator.Sections.RuntimeComponents do
 
   @behaviour ArchLens.Generator.Section
 
+  alias ArchLens.Collect.ModuleDoc
   alias ArchLens.Generator.Section
 
   @heading "## Runtime components"
@@ -34,11 +35,18 @@ defmodule ArchLens.Generator.Sections.RuntimeComponents do
   defp line(entry) when is_map(entry) do
     case get(entry, "label") do
       nil -> Section.bullet(entry)
-      label -> "- `#{label}`#{class_suffix(entry)}#{evidence_suffix(entry)}"
+      label -> "- `#{label}`#{class_suffix(entry)}#{evidence_suffix(entry)}#{doc_suffix(entry)}"
     end
   end
 
   defp line(entry), do: Section.bullet(entry)
+
+  defp doc_suffix(entry) do
+    case get(entry, "doc") do
+      doc when is_binary(doc) -> " — #{ModuleDoc.first_sentence(doc)}"
+      _ -> ""
+    end
+  end
 
   defp class_suffix(entry) do
     case get(entry, "class") do

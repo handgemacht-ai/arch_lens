@@ -10,6 +10,8 @@ defmodule ArchLens.Generator.Document do
   artifacts can never disagree.
   """
 
+  alias ArchLens.Collect.ModuleDoc
+
   alias ArchLens.Generator.Sections.{
     DeclaredArchitecture,
     EntryPoints,
@@ -57,9 +59,14 @@ defmodule ArchLens.Generator.Document do
   defp resource_entry(resource) do
     [
       "### #{resource[:module]}",
-      "" | posture_lines(resource[:privacy]) ++ provenance_lines(resource)
+      ""
+      | doc_lines(resource[:doc]) ++
+          posture_lines(resource[:privacy]) ++ provenance_lines(resource)
     ]
   end
+
+  defp doc_lines(doc) when is_binary(doc), do: ["_#{ModuleDoc.first_sentence(doc)}_", ""]
+  defp doc_lines(_doc), do: []
 
   defp posture_lines(%{posture: "declared"} = privacy) do
     [
@@ -123,8 +130,15 @@ defmodule ArchLens.Generator.Document do
   end
 
   defp oban_section(%{oban_workers: workers}) do
-    ["## Oban jobs", "" | Enum.map(workers, &"- `#{&1[:module]}`")]
+    ["## Oban jobs", "" | Enum.map(workers, &oban_line/1)]
   end
+
+  defp oban_line(worker) do
+    "- `#{worker[:module]}`#{doc_suffix(worker[:doc])}"
+  end
+
+  defp doc_suffix(doc) when is_binary(doc), do: " — #{ModuleDoc.first_sentence(doc)}"
+  defp doc_suffix(_doc), do: ""
 
   defp optional_sections(model) do
     [

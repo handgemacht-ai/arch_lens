@@ -126,6 +126,33 @@ defmodule ArchLens.Collect.RuntimeTest do
     end
   end
 
+  describe "module doc collection" do
+    alias ArchLens.ModuleDocFixtures
+
+    test "a module-backed component carries its moduledoc first paragraph" do
+      children = [
+        {ModuleDocFixtures.MultiParagraph, self(), :worker, [ModuleDocFixtures.MultiParagraph]}
+      ]
+
+      assert [element] = Runtime.components(supervisor_children: children)
+      assert element.class == "custom"
+
+      assert element.doc ==
+               "Collects semantic review findings and writes them back to the annotation."
+    end
+
+    test "a datastore repo without a moduledoc omits the doc field" do
+      assert [element] = Runtime.datastores(ecto_repos: [PgRepo])
+      refute Map.has_key?(element, :doc)
+    end
+
+    test "a component whose subject is not a loaded module omits the doc field" do
+      children = [{:some_registered_name, self(), :supervisor, [Task.Supervisor]}]
+      assert [element] = Runtime.components(supervisor_children: children)
+      refute Map.has_key?(element, :doc)
+    end
+  end
+
   describe "collect/1 — union, merge, degradation" do
     test "degrades to config-only collection with no live tree" do
       elements = Runtime.collect(ecto_repos: [PgRepo], oban_config: [])

@@ -42,6 +42,7 @@ defmodule ArchLens.Collect.Runtime do
       testing/degradation seam.
   """
 
+  alias ArchLens.Collect.ModuleDoc
   alias ArchLens.Edge
 
   @type element :: %{
@@ -50,7 +51,8 @@ defmodule ArchLens.Collect.Runtime do
           required(:class) => String.t(),
           required(:source) => String.t(),
           required(:evidence) => [String.t()],
-          optional(:technology) => String.t()
+          optional(:technology) => String.t(),
+          optional(:doc) => String.t()
         }
 
   @doc """
@@ -116,6 +118,7 @@ defmodule ArchLens.Collect.Runtime do
       evidence: ["config:ecto_repos"]
     }
     |> maybe_put(:technology, repo_technology(repo))
+    |> maybe_put(:doc, ModuleDoc.first_paragraph(repo))
   end
 
   defp repo_technology(repo) do
@@ -255,6 +258,7 @@ defmodule ArchLens.Collect.Runtime do
       evidence: ["supervision_tree"]
     }
     |> maybe_put(:technology, class == "repo" && repo_technology(subject))
+    |> maybe_put(:doc, ModuleDoc.first_paragraph(subject))
   end
 
   defp id_prefix("repo"), do: "datastore:"
