@@ -151,6 +151,73 @@ defmodule ArchLens.Generator.ModelTest do
     end
   end
 
+  describe "collected module doc" do
+    # A dedicated opts set wiring realistically compiled fixtures across all three
+    # extraction cases through the resource and Oban surfaces at once.
+    defp doc_opts do
+      [
+        domains: [],
+        scanned_resources: [ArchLens.TestSupport.DocumentedResource],
+        edges: [],
+        oban_workers: [
+          ArchLens.ModuleDocFixtures.MultiParagraph,
+          ArchLens.ModuleDocFixtures.DocFalse,
+          ArchLens.ModuleDocFixtures.NoDoc
+        ]
+      ]
+    end
+
+    defp doc_decoded, do: doc_opts() |> Scope.resolve() |> Model.to_json() |> Jason.decode!()
+
+    test "a resource surfaces only the first paragraph of its @moduledoc" do
+      resource =
+        Enum.find(
+          doc_decoded()["resources"],
+          &(&1["id"] == "res:ArchLens.TestSupport.DocumentedResource")
+        )
+
+      assert resource["doc"] ==
+               "Stores contact submissions captured from the public marketing site."
+    end
+
+    test "an Oban worker with a moduledoc carries its first paragraph" do
+      worker =
+        Enum.find(
+          doc_decoded()["oban_workers"],
+          &(&1["id"] == "oban:ArchLens.ModuleDocFixtures.MultiParagraph")
+        )
+
+      assert worker["doc"] ==
+               "Collects semantic review findings and writes them back to the annotation."
+    end
+
+    test "@moduledoc false and no-moduledoc modules omit the doc field entirely" do
+      workers = doc_decoded()["oban_workers"]
+
+      doc_false =
+        Enum.find(workers, &(&1["id"] == "oban:ArchLens.ModuleDocFixtures.DocFalse"))
+
+      no_doc =
+        Enum.find(workers, &(&1["id"] == "oban:ArchLens.ModuleDocFixtures.NoDoc"))
+
+      refute Map.has_key?(doc_false, "doc")
+      refute Map.has_key?(no_doc, "doc")
+    end
+
+    test "the doc field is deterministic across two renders" do
+      scope = Scope.resolve(doc_opts())
+      assert Model.to_json(scope) == Model.to_json(scope)
+    end
+
+    test "markdown renders the resource's first sentence, not the whole paragraph" do
+      markdown = doc_opts() |> Scope.resolve() |> Model.to_map() |> Document.render()
+
+      assert markdown =~ "_Stores contact submissions captured from the public marketing site._"
+      # the dropped second paragraph never reaches the document
+      refute markdown =~ "internal retention mechanics"
+    end
+  end
+
   describe "follow-up-slice seams" do
     test "the four seams are present and empty by default" do
       model = decoded()

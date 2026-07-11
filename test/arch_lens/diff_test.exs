@@ -417,6 +417,27 @@ defmodule ArchLens.DiffTest do
     end
   end
 
+  # --- optional doc field backward compatibility --------------------------
+
+  describe "optional doc field (schema unchanged)" do
+    test "a v1 baseline without doc diffs cleanly against a v1 candidate carrying doc" do
+      baseline = model(%{"resources" => [res("X", no_personal_data())]})
+
+      documented = Map.put(res("X", no_personal_data()), "doc", "Stores things.")
+      candidate = model(%{"resources" => [documented]})
+
+      # Same schema_version on both sides, so no SchemaMismatchError is raised.
+      result = Diff.compute(baseline, candidate)
+
+      assert [delta] = result.changed
+      assert delta.id == "res:X"
+      # Gaining a doc is informational, never a privacy/egress widening.
+      assert delta.severity == :info
+      assert Diff.warning_count(result) == 0
+      assert Enum.any?(delta.changes, &(&1.field == "doc"))
+    end
+  end
+
   # --- warnings surface ---------------------------------------------------
 
   describe "warnings/1 and warning_count/1" do

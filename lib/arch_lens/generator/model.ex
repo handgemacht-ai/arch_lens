@@ -20,6 +20,7 @@ defmodule ArchLens.Generator.Model do
   is byte-identical.
   """
 
+  alias ArchLens.Collect.ModuleDoc
   alias ArchLens.Edge
   alias ArchLens.Generator.{Paths, Retention, Scope, Section}
 
@@ -84,6 +85,7 @@ defmodule ArchLens.Generator.Model do
       discovered_via_scan: resource not in scope.domain_resources,
       privacy: privacy_map(resource, scope.edges)
     }
+    |> maybe_put(:doc, ModuleDoc.first_paragraph(resource))
   end
 
   defp privacy_map(resource, edges) do
@@ -135,7 +137,9 @@ defmodule ArchLens.Generator.Model do
 
   defp oban_worker_map(module) do
     name = Edge.module_name(module)
+
     %{id: "oban:" <> name, module: name, source: "collected"}
+    |> maybe_put(:doc, ModuleDoc.first_paragraph(module))
   end
 
   defp maybe_put(map, _key, nil), do: map
