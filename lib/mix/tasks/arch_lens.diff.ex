@@ -20,6 +20,12 @@ defmodule Mix.Tasks.ArchLens.Diff do
       (`git show <merge-base>:<path>`), so the diff reflects only what this branch
       changed, not what moved on the base branch. If the sidecar does not exist at
       that ref (first adoption), everything is reported as added.
+
+      The base ref must be fetched: a shallow checkout (e.g. `actions/checkout`
+      with `fetch-depth: 1`) has no objects for `origin/main`. When the ref cannot
+      be resolved the task does **not** fail — it degrades to a full snapshot
+      (as if there were no baseline), prints a distinct notice, and still exits 0.
+      Fetch the base ref (`git fetch --depth=… origin main`) for a real diff.
     * `--base-file <path>`: read the baseline JSON from a file instead of git.
 
   ## Candidate
@@ -63,7 +69,8 @@ defmodule Mix.Tasks.ArchLens.Diff do
     {opts, _rest, _invalid} = OptionParser.parse(argv, switches: @switches)
 
     case report(opts) do
-      {:ok, %{output: output, warn_count: warn_count}} ->
+      {:ok, %{output: output, warn_count: warn_count} = result} ->
+        if notice = result[:notice], do: Mix.shell().info(notice)
         Mix.shell().info(output)
 
         if Keyword.get(opts, :fail_on_warn, false) and warn_count > 0 do
@@ -79,30 +86,32 @@ defmodule Mix.Tasks.ArchLens.Diff do
 
   @doc false
   # Resolve baseline + candidate, compute the diff, and render it. Returns
-  # `{:ok, %{output, warn_count, result}}` or `{:error, message}`. Split out so
-  # the resolve/decode/compute/render pipeline is exercised without the IO and
-  # exit-code glue in `run/1`.
+  # `{:ok, %{output, warn_count, result, notice}}` or `{:error, message}` (`notice`
+  # is a non-fatal message, e.g. a degraded unresolvable base ref, or `nil`). Split
+  # out so the resolve/decode/compute/render pipeline is exercised without the IO
+  # and exit-code glue in `run/1`.
   @spec report(keyword()) :: {:ok, map()} | {:error, String.t()}
   def report(opts) do
     path = Keyword.get(opts, :path, Architecture.json_artifact())
 
     with {:ok, format} <- parse_format(Keyword.get(opts, :format, "text")),
          {:ok, candidate_raw} <- read_candidate(opts, path),
-         {:ok, baseline_raw} <- read_baseline(opts, path),
+         {:ok, baseline_raw, notice} <- read_baseline(opts, path),
          {:ok, candidate} <- decode(candidate_raw, "candidate sidecar"),
          {:ok, baseline} <- decode_baseline(baseline_raw) do
-      compute_and_render(baseline, candidate, format)
+      compute_and_render(baseline, candidate, format, notice)
     end
   end
 
-  defp compute_and_render(baseline, candidate, format) do
+  defp compute_and_render(baseline, candidate, format, notice) do
     result = Diff.compute(baseline, candidate)
 
     {:ok,
      %{
        output: Diff.render(result, format),
        warn_count: Diff.warning_count(result),
-       result: result
+       result: result,
+       notice: notice
      }}
   rescue
     error in Diff.SchemaMismatchError -> {:error, Exception.message(error)}
@@ -137,7 +146,7 @@ defmodule Mix.Tasks.ArchLens.Diff do
 
     case git(["show", "#{rev}:#{path}"]) do
       {:ok, content} ->
-        {:ok, {:present, content}}
+        {:ok, {:present, content}, nil}
 
       {:error, output} ->
         classify_git_show_failure(output, ref)
@@ -146,12 +155,21 @@ defmodule Mix.Tasks.ArchLens.Diff do
 
   defp classify_git_show_failure(output, ref) do
     if unresolvable_ref?(output) do
-      {:error, "arch_lens.diff: cannot resolve base ref #{inspect(ref)}: #{String.trim(output)}"}
+      # A shallow CI checkout (e.g. actions/checkout fetch-depth 1) has no objects
+      # for the base ref. Rather than hard-fail, degrade to the absent-baseline path
+      # (full snapshot, exit 0) and surface a distinct notice so the reader knows the
+      # diff is not against a real baseline.
+      {:ok, :absent, unresolvable_notice(ref)}
     else
       # The ref resolves but the sidecar does not exist there: first adoption. The
       # rendered report itself notes the absent baseline, so nothing is printed here.
-      {:ok, :absent}
+      {:ok, :absent, nil}
     end
+  end
+
+  defp unresolvable_notice(ref) do
+    "arch_lens.diff: baseline ref #{ref} not resolvable in this checkout " <>
+      "(shallow clone?) — showing full snapshot; fetch the base ref for a real diff."
   end
 
   defp unresolvable_ref?(output) do
@@ -225,6 +243,6 @@ defmodule Mix.Tasks.ArchLens.Diff do
     end
   end
 
-  defp wrap_present({:ok, content}), do: {:ok, {:present, content}}
+  defp wrap_present({:ok, content}), do: {:ok, {:present, content}, nil}
   defp wrap_present({:error, _message} = error), do: error
 end

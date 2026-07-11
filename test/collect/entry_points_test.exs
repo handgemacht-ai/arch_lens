@@ -29,7 +29,7 @@ defmodule ArchLens.Collect.EntryPointsTest do
       assert browser.handler == "ArchLens.CollectFixtures.PageController"
       assert browser.action == "index"
       assert browser.pipelines == []
-      assert browser.basis == "controller route"
+      assert browser.basis == "accepts html"
       assert browser.source == :collected
     end
 
@@ -162,14 +162,48 @@ defmodule ArchLens.Collect.EntryPointsTest do
       assert entry.basis == "pipeline :api"
     end
 
-    test "a plain controller route is the browser default" do
+    test "an html-accepting controller route is a browser entry point" do
       [entry] =
         EntryPoints.from_routes([
-          route(verb: :get, path: "/", plug: MyApp.Root, plug_opts: :home, pipe_through: [])
+          route(
+            verb: :get,
+            path: "/dash",
+            plug: MyApp.Root,
+            plug_opts: :home,
+            pipe_through: [],
+            accepts: ["html"]
+          )
         ])
 
       assert entry.kind == :browser
-      assert entry.basis == "controller route"
+      assert entry.basis == "accepts html"
+    end
+
+    test "a JSON controller behind a custom pipeline is an api entry point, not browser" do
+      [entry] =
+        EntryPoints.from_routes([
+          route(
+            verb: :post,
+            path: "/internal/data",
+            plug: MyApp.SecretController,
+            plug_opts: :create,
+            pipe_through: [:secure],
+            metadata: %{accepts: ["json"]}
+          )
+        ])
+
+      assert entry.kind == :api
+      assert entry.basis == "accepts json"
+    end
+
+    test "a controller route with no determinable evidence is :other, never a silent :browser" do
+      [entry] =
+        EntryPoints.from_routes([
+          route(verb: :get, path: "/thing", plug: MyApp.Thing, plug_opts: :show, pipe_through: [])
+        ])
+
+      assert entry.kind == :other
+      assert entry.basis == "unclassified"
     end
 
     test "a forward to an unrecognised plug falls back to :other" do

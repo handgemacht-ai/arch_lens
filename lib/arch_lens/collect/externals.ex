@@ -13,8 +13,12 @@ defmodule ArchLens.Collect.Externals do
       are transport, not vendors, and are deliberately excluded.
     * **Swoosh adapters** — the configured mailer adapter names the provider
       (`Swoosh.Adapters.Sendgrid` → Sendgrid, `…Mailgun` → Mailgun, `…AmazonSES`
-      → Amazon SES). Adapters are read from the app's config; local/test adapters
-      are not external systems.
+      → Amazon SES). To stay deterministic across environments, adapters are read
+      from the committed **config files** evaluated for the `:prod` env (via
+      `Config.Reader`), falling back to live app config only when the files reveal
+      nothing; the evidence records which source it came from. Local/test adapters
+      are not external systems, so an app whose only adapter anywhere is
+      `Local`/`Test` yields no mailer.
     * **HTTP boundary edges** — every `:http_boundary` `ArchLens.Edge` already
       collected, its target host canonicalised to a vendor.
 
@@ -30,9 +34,11 @@ defmodule ArchLens.Collect.Externals do
 
     * `:otp_app` — the host OTP application (drives Swoosh-adapter config discovery).
     * `:deps` — override the dependency list (atoms or dep tuples); defaults to the
-      host `Mix.Project`'s deps.
+      host `Mix.Project`'s **direct** deps.
     * `:edges` — the recorded edges to mine `:http_boundary` targets from.
     * `:swoosh_adapters` — override the discovered Swoosh adapter modules.
+    * `:config_path` — override the config file read for prod Swoosh-adapter
+      discovery (defaults to `config/config.exs`, then `config/prod.exs`).
   """
 
   alias ArchLens.Edge
@@ -116,7 +122,7 @@ defmodule ArchLens.Collect.Externals do
   def swoosh_vendors(opts) do
     opts
     |> swoosh_adapters()
-    |> Enum.flat_map(&swoosh_vendor/1)
+    |> Enum.flat_map(fn {adapter, source} -> swoosh_vendor(adapter, source) end)
   end
 
   @doc "External-system elements derived from `:http_boundary` edge targets."
@@ -128,6 +134,13 @@ defmodule ArchLens.Collect.Externals do
     |> Enum.map(&boundary_vendor/1)
   end
 
+  @doc false
+  # The dependency app names the default scan considers: the host app's DIRECT deps
+  # only (never the transitive closure). Exposed so tests can assert the scope of the
+  # scan without depending on which vendors a particular project happens to pull in.
+  @spec scanned_dep_names(keyword()) :: [atom()]
+  def scanned_dep_names(opts \\ []), do: deps(opts)
+
   # --- dependencies -------------------------------------------------------
 
   defp deps(opts) do
@@ -138,11 +151,15 @@ defmodule ArchLens.Collect.Externals do
     |> Enum.uniq()
   end
 
+  # Only the host app's DIRECT dependencies (`Mix.Project.config()[:deps]`), never
+  # the full transitive closure (`Mix.Project.deps_apps/0`): a vendor is a party the
+  # app itself chose to talk to, so a transitive dep pulled in by something else must
+  # not fabricate an external system.
   defp host_deps do
-    cond do
-      not Code.ensure_loaded?(Mix.Project) -> []
-      function_exported?(Mix.Project, :deps_apps, 0) -> Mix.Project.deps_apps()
-      true -> Mix.Project.config()[:deps] || []
+    if Code.ensure_loaded?(Mix.Project) do
+      Mix.Project.config()[:deps] || []
+    else
+      []
     end
   rescue
     _ -> []
@@ -175,24 +192,85 @@ defmodule ArchLens.Collect.Externals do
 
   # --- Swoosh -------------------------------------------------------------
 
+  # Returns `{adapter_module, source}` pairs. An explicit `:swoosh_adapters` override
+  # carries no source (`nil`); discovered adapters record where the evidence came from
+  # (a config file path, or "runtime config").
   defp swoosh_adapters(opts) do
     opts
     |> Keyword.get_lazy(:swoosh_adapters, fn -> discover_swoosh_adapters(opts) end)
-    |> Enum.filter(&swoosh_adapter?/1)
+    |> Enum.map(&with_source/1)
+    |> Enum.filter(fn {module, _source} -> swoosh_adapter?(module) end)
     |> Enum.uniq()
   end
 
+  defp with_source({module, source}), do: {module, source}
+  defp with_source(module), do: {module, nil}
+
+  # Discover the host app's mailer adapter deterministically: prefer the committed
+  # config FILES evaluated for the prod env (a fixed input, unlike the dev/CI live
+  # config, which carries the Local/Test adapter and would omit the real mailer), and
+  # only fall back to live app config when the files reveal nothing.
   defp discover_swoosh_adapters(opts) do
     case Keyword.get(opts, :otp_app) do
-      nil ->
-        []
-
-      app ->
-        app
-        |> Application.get_all_env()
-        |> Enum.flat_map(fn {_key, value} -> adapter_from_config(value) end)
-        |> Enum.uniq()
+      nil -> []
+      app -> discover_for_app(app, opts)
     end
+  end
+
+  defp discover_for_app(app, opts) do
+    case config_file_adapters(app, opts) do
+      [] -> live_adapters(app)
+      file_adapters -> file_adapters
+    end
+  end
+
+  defp config_file_adapters(app, opts) do
+    opts
+    |> config_files()
+    |> Enum.flat_map(&adapters_from_config_file(&1, app))
+    |> Enum.uniq()
+  end
+
+  defp config_files(opts) do
+    case Keyword.get(opts, :config_path) do
+      nil -> default_config_files()
+      path -> [path]
+    end
+  end
+
+  # Prefer the base `config/config.exs` (which imports the env file for prod); fall
+  # back to a bare `config/prod.exs`. Only the first existing one is read.
+  defp default_config_files do
+    ["config/config.exs", "config/prod.exs"]
+    |> Enum.map(&Path.expand/1)
+    |> Enum.filter(&File.regular?/1)
+    |> Enum.take(1)
+  end
+
+  defp adapters_from_config_file(path, app) do
+    source = Path.relative_to_cwd(path)
+
+    path
+    |> read_prod_config()
+    |> Keyword.get(app, [])
+    |> Enum.flat_map(fn {_key, value} -> adapter_from_config(value) end)
+    |> Enum.map(&{&1, source})
+  rescue
+    _ -> []
+  end
+
+  defp read_prod_config(path) do
+    Config.Reader.read!(path, env: :prod)
+  rescue
+    _ -> []
+  end
+
+  defp live_adapters(app) do
+    app
+    |> Application.get_all_env()
+    |> Enum.flat_map(fn {_key, value} -> adapter_from_config(value) end)
+    |> Enum.uniq()
+    |> Enum.map(&{&1, "runtime config"})
   rescue
     _ -> []
   end
@@ -210,16 +288,21 @@ defmodule ArchLens.Collect.Externals do
     is_atom(module) and String.starts_with?(name(module), "Swoosh.Adapters.")
   end
 
-  defp swoosh_vendor(adapter) do
+  defp swoosh_vendor(adapter, source) do
     "Swoosh.Adapters." <> provider = name(adapter)
 
     if provider in @non_vendor_swoosh do
       []
     else
       vendor = Map.get(@swoosh_providers, provider, provider)
-      [element(vendor, "email", %{type: "swoosh_adapter", value: name(adapter)})]
+      [element(vendor, "email", swoosh_evidence(name(adapter), source))]
     end
   end
+
+  defp swoosh_evidence(adapter_name, nil), do: %{type: "swoosh_adapter", value: adapter_name}
+
+  defp swoosh_evidence(adapter_name, source),
+    do: %{type: "swoosh_adapter", value: adapter_name, source: source}
 
   # --- HTTP boundary edges ------------------------------------------------
 

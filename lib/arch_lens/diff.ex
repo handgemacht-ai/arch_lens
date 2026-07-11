@@ -52,7 +52,6 @@ defmodule ArchLens.Diff do
     external_systems
     runtime_components
     entry_points
-    declared_architecture
   )
 
   @type severity :: :warn | :info
@@ -277,13 +276,43 @@ defmodule ArchLens.Diff do
   # --- element indexing ---------------------------------------------------
 
   defp index_elements(model) do
-    for group <- @element_groups,
-        entry <- Map.get(model, group, []),
+    list_elements =
+      for group <- @element_groups,
+          entry <- Map.get(model, group, []),
+          is_map(entry),
+          into: %{} do
+        id = element_id(group, entry)
+        {{group, id}, %{group: group, id: id, kind: kind_of(group, entry), entry: entry}}
+      end
+
+    Map.merge(list_elements, declared_elements(Map.get(model, "declared_architecture")))
+  end
+
+  # `declared_architecture` is a map (`%{"actors", "contexts", "warnings"}`), not a
+  # list, so it is indexed here rather than in the list loop above: actors and
+  # contexts each become their own diffable element under a stable `decl:*` id.
+  defp declared_elements(%{} = declared) do
+    Map.merge(
+      declared_group(declared, "actors", "decl:actor", "declared_actor"),
+      declared_group(declared, "contexts", "decl:context", "declared_context")
+    )
+  end
+
+  defp declared_elements(_declared), do: %{}
+
+  defp declared_group(declared, key, id_prefix, kind) do
+    for entry <- Map.get(declared, key, []),
         is_map(entry),
         into: %{} do
-      id = element_id(group, entry)
-      {{group, id}, %{group: group, id: id, kind: kind_of(group, entry), entry: entry}}
+      id = id_prefix <> ":" <> declared_name(entry)
+
+      {{"declared_architecture", id},
+       %{group: "declared_architecture", id: id, kind: kind, entry: entry}}
     end
+  end
+
+  defp declared_name(entry) do
+    to_string(entry["name"] || entry["label"] || :erlang.phash2(entry))
   end
 
   defp element_id(group, entry) do
@@ -303,7 +332,6 @@ defmodule ArchLens.Diff do
   defp kind_of("external_systems", _entry), do: "external_system"
   defp kind_of("runtime_components", _entry), do: "runtime_component"
   defp kind_of("entry_points", _entry), do: "entry_point"
-  defp kind_of("declared_architecture", _entry), do: "declared_architecture"
 
   # --- privacy accessors --------------------------------------------------
 

@@ -29,12 +29,16 @@ defmodule ArchLens.Collect.EntryPoints do
     * `:mcp` — an `/mcp` path segment, or a forward targeting an MCP/Hermes plug.
     * `:oauth` — an `oauth` pipeline/path segment, or an OAuth-named plug.
     * `:webhook` — a `webhook(s)` pipeline/path segment, or a Webhook-named plug.
-    * `:api` — an `api`/`bearer`/`token` pipeline, an `/api` path segment, or an
-      API-named plug (JSON + bearer-ish).
-    * `:browser` — a LiveView route, a `browser`/`html` pipeline, or a plain
-      (non-forward) controller route (the "accepts html" default).
-    * `:other` — matched none of the above (e.g. a forward to an unrecognised
-      plug).
+    * `:api` — an `api`/`bearer`/`token` pipeline, an `/api` path segment, an
+      API-named plug (JSON + bearer-ish), or a route whose declared `accepts` are
+      JSON-only.
+    * `:browser` — a LiveView route, a `browser`/`html` pipeline, or a route whose
+      declared `accepts` include `html`.
+    * `:other` — matched none of the above, including a controller route with **no
+      determinable evidence** (no pipeline, path, plug, or `accepts` signal). Such a
+      route is `:other` with basis `"unclassified"` — never a silent `:browser`
+      default, which would mislabel e.g. a JSON API sitting behind a custom auth
+      pipeline whose plug/path carry no `api` token.
 
   Precedence is deliberate: a `/api/mcp` route is an MCP entry point, not a plain
   API one.
@@ -43,7 +47,9 @@ defmodule ArchLens.Collect.EntryPoints do
   names the one that fired. `Phoenix.Router.routes/1` on Phoenix 1.8+ no longer
   exposes `pipe_through`, so pipeline signals only fire for callers that pass full
   route structs (older Phoenix, or hand-built maps); real 1.8 routers classify on
-  the path and plug signals. `pipelines` is still recorded (empty when the router
+  the path, plug, and `accepts` signals. A route's accepted content types are read
+  from a top-level `:accepts` field or `metadata[:accepts]` (Phoenix stores route
+  `metadata`), when present. `pipelines` is still recorded (empty when the router
   does not expose them) so the element schema is stable.
   """
 
@@ -114,14 +120,34 @@ defmodule ArchLens.Collect.EntryPoints do
       plug_opts: Map.get(route, :plug_opts),
       pipe_through: List.wrap(Map.get(route, :pipe_through)),
       metadata: metadata,
+      accepts: normalize_accepts(Map.get(route, :accepts) || Map.get(metadata, :accepts)),
       forward?: Map.get(route, :kind) == :forward or Map.has_key?(metadata, :forward)
     }
+  end
+
+  defp normalize_accepts(nil), do: []
+
+  defp normalize_accepts(value) do
+    value
+    |> List.wrap()
+    |> Enum.map(&(&1 |> to_string() |> String.downcase()))
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.uniq()
+    |> Enum.sort()
   end
 
   # --- classification --------------------------------------------------------
 
   defp classify(route) do
-    rules = [&mcp_rule/1, &oauth_rule/1, &webhook_rule/1, &api_rule/1, &browser_rule/1]
+    rules = [
+      &mcp_rule/1,
+      &oauth_rule/1,
+      &webhook_rule/1,
+      &api_rule/1,
+      &browser_rule/1,
+      &accepts_rule/1
+    ]
+
     Enum.find_value(rules, {:other, "unclassified"}, & &1.(route))
   end
 
@@ -167,16 +193,25 @@ defmodule ArchLens.Collect.EntryPoints do
     cond do
       live_view?(route) -> {:browser, "LiveView route"}
       name = pipeline_matching(route, ~r/browser|html/) -> {:browser, "pipeline :" <> name}
-      controller_route?(route) -> {:browser, "controller route"}
       true -> nil
     end
   end
 
-  # A non-forward route dispatched to a plain module plug (a Phoenix controller):
-  # the "accepts html" default once the more specific kinds have been ruled out.
-  defp controller_route?(route) do
-    not route.forward? and is_atom(route.plug) and route.plug not in [nil, Phoenix.LiveView.Plug]
+  # The last-resort evidence for a controller route that carried no pipeline, path,
+  # or plug-name signal: the content types it declares it accepts. An html-accepting
+  # route is a browser entry point; a JSON-only route is an API one. A route with no
+  # `accepts` evidence is left to the `:other`/"unclassified" fallback rather than
+  # being silently defaulted to `:browser`.
+  defp accepts_rule(route) do
+    cond do
+      route.accepts == [] -> nil
+      "html" in route.accepts -> {:browser, "accepts html"}
+      json_only?(route.accepts) -> {:api, "accepts json"}
+      true -> nil
+    end
   end
+
+  defp json_only?(accepts), do: accepts != [] and Enum.all?(accepts, &(&1 == "json"))
 
   # First pipeline (in sorted order, for determinism) whose name matches `regex`.
   defp pipeline_matching(route, regex) do

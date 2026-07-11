@@ -90,6 +90,37 @@ defmodule Mix.Tasks.ArchLens.DiffTest do
     assert output =~ "**WARN** new external data egress"
   end
 
+  test "report/1 degrades an unresolvable --base ref to a full snapshot with a notice", %{
+    cand_path: cand
+  } do
+    ref = "origin/no-such-ref-#{System.unique_integer([:positive])}"
+
+    assert {:ok, %{notice: notice, result: result, warn_count: warn}} =
+             Task.report(base: ref, candidate_file: cand, format: "json")
+
+    assert notice =~ "not resolvable in this checkout"
+    assert notice =~ ref
+    assert result.baseline_present == false
+    # a full snapshot: every candidate element is reported as added.
+    assert length(result.added) == 2
+    # the http_boundary egress and the system-new data category both warn.
+    assert warn == 2
+  end
+
+  test "run/1 with an unresolvable --base ref prints the notice and does not raise", %{
+    cand_path: cand
+  } do
+    ref = "origin/no-such-ref-#{System.unique_integer([:positive])}"
+
+    output =
+      capture_io(fn ->
+        Task.run(["--base", ref, "--candidate-file", cand, "--format", "text"])
+      end)
+
+    assert output =~ "not resolvable in this checkout"
+    assert output =~ "showing full snapshot"
+  end
+
   test "report/1 surfaces a schema_version mismatch as an error", %{dir: dir, cand_path: cand} do
     bad = Path.join(dir, "bad.json")
     File.write!(bad, Jason.encode!(model(%{"schema_version" => 99})))

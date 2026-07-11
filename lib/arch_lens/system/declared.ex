@@ -9,9 +9,9 @@ defmodule ArchLens.System.Declared do
   externals, contexts, plus any skipped-validation `warnings` — or raises
   `ArchLens.System.ValidationError` listing every failing check.
 
-  When the caller does not supply `:vendors` / `:known_modules`, they are derived
+  When the caller does not supply `:known_modules`, they are derived
   deterministically from the app and the already-collected scope so context module
-  prefixes and dependency vendors can be checked without a database.
+  prefixes can be checked without a database.
   """
 
   alias ArchLens.Edge
@@ -39,7 +39,7 @@ defmodule ArchLens.System.Declared do
 
   `inputs` carries the collected context: `:entry_points`, `:external_systems`,
   optionally `:app`, `:resources`, `:oban_workers`, `:edges` (to derive known
-  modules), and overrides `:vendors` / `:known_modules`.
+  modules), and the `:known_modules` override.
 
   Returns the structured scope value, or raises `ArchLens.System.ValidationError`.
   """
@@ -76,16 +76,8 @@ defmodule ArchLens.System.Declared do
     %{
       entry_points: Map.get(inputs, :entry_points, []),
       external_systems: Map.get(inputs, :external_systems, []),
-      vendors: Map.get(inputs, :vendors) || derive_vendors(inputs),
       known_modules: Map.get(inputs, :known_modules) || derive_known_modules(inputs)
     }
-  end
-
-  defp derive_vendors(inputs) do
-    case Map.get(inputs, :app) do
-      nil -> []
-      app -> app |> app_key(:applications) |> Enum.map(&Atom.to_string/1)
-    end
   end
 
   defp derive_known_modules(inputs) do

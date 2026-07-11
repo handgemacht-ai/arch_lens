@@ -1,6 +1,8 @@
 defmodule ArchLens.System.ValidateTest do
   use ExUnit.Case, async: true
 
+  alias ArchLens.Collect.Externals
+  alias ArchLens.Edge
   alias ArchLens.System.Validate
 
   defp actor(name, uses), do: %{name: name, uses: uses, does: "x", source: "declared"}
@@ -10,6 +12,17 @@ defmodule ArchLens.System.ValidateTest do
 
   defp context(name, modules),
     do: %{name: name, does: "x", modules: modules, source: "declared"}
+
+  # A real HTTP boundary edge, mined into a collected external system by the actual
+  # ArchLens.Collect.Externals — the shape Validate must reconcile against.
+  defp boundary(target) do
+    %Edge{
+      kind: :http_boundary,
+      builder: {ArchLens.CollectFixtures.Custom, :call},
+      target: target,
+      call_sites: [{"lib/x.ex", 1}]
+    }
+  end
 
   defp declared(opts) do
     %{
@@ -86,27 +99,60 @@ defmodule ArchLens.System.ValidateTest do
   end
 
   describe "rule (b): HTTP externals" do
-    test "passes when the target matches a collected external system" do
+    test "passes when the declared id matches a collected external system (dep evidence)" do
       declared = declared(externals: [external(:stripe, "https://api.stripe.com")])
-      ctx = Validate.context(%{external_systems: [%{target: "https://api.stripe.com/"}]})
+      ctx = Validate.context(%{external_systems: Externals.collect(deps: [:stripity_stripe])})
 
       assert {:ok, []} = Validate.validate(declared, ctx)
     end
 
-    test "passes when the name matches a dependency vendor" do
-      declared = declared(externals: [external(:req, "https://example.test")])
-      ctx = Validate.context(%{external_systems: [%{target: "https://other"}], vendors: [:req]})
+    test "passes when the declared target host matches a collected HTTP boundary" do
+      declared = declared(externals: [external(:acme, "https://api.acme.io")])
+
+      ctx =
+        Validate.context(%{
+          external_systems: Externals.collect(edges: [boundary("https://api.acme.io")])
+        })
 
       assert {:ok, []} = Validate.validate(declared, ctx)
     end
 
-    test "fails when it matches neither a collected system nor a vendor" do
+    # Regression (false-REJECT): the real Collect.Externals element carries no
+    # :target key — only an id/vendor and evidence — so target-only matching used to
+    # reject a truthful declaration outright.
+    test "a truthful declared external passes against real Collect.Externals output" do
       declared = declared(externals: [external(:stripe, "https://api.stripe.com")])
-      ctx = Validate.context(%{external_systems: [%{target: "https://other"}]})
+      collected = Externals.collect(deps: [:stripity_stripe])
+
+      refute Enum.any?(collected, &Map.has_key?(&1, :target))
+
+      assert {:ok, []} =
+               Validate.validate(declared, Validate.context(%{external_systems: collected}))
+    end
+
+    test "fails when it matches neither a collected system id nor a boundary host" do
+      declared = declared(externals: [external(:stripe, "https://api.stripe.com")])
+      ctx = Validate.context(%{external_systems: Externals.collect(deps: [:sentry])})
 
       assert {:error, [message]} = Validate.validate(declared, ctx)
       assert message =~ "external :stripe"
       assert message =~ "https://api.stripe.com"
+    end
+
+    # Regression (false-ACCEPT): a bare name collision with an arbitrary dependency
+    # app in the OTP closure must NOT corroborate egress. `:jason` is a real dep, so
+    # the old app-closure vendor match let a fabricated target pass.
+    test "a fabricated external is not corroborated by a dependency-app name collision" do
+      declared = declared(externals: [external(:jason, "https://fabricated.example")])
+
+      ctx =
+        Validate.context(%{
+          external_systems: Externals.collect(deps: [:stripity_stripe]),
+          vendors: [:jason, :phoenix, :ash]
+        })
+
+      assert {:error, [message]} = Validate.validate(declared, ctx)
+      assert message =~ "external :jason"
     end
 
     test "skips with a warning when no external systems were collected" do
@@ -163,7 +209,7 @@ defmodule ArchLens.System.ValidateTest do
       ctx =
         Validate.context(%{
           entry_points: [%{kind: :api}],
-          external_systems: [%{target: "https://other"}],
+          external_systems: Externals.collect(deps: [:sentry]),
           known_modules: ["MyApp.Billing.Plan"]
         })
 
