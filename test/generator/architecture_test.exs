@@ -80,7 +80,13 @@ end
 
 defmodule ArchLens.GenFixtures.Domain do
   @moduledoc false
-  use Ash.Domain, validate_config_inclusion?: false
+  # Annotated in place so the new annotation gate (every discovered Ash domain must
+  # carry a resolvable description or be excluded) passes for this fixture app.
+  use Ash.Domain, validate_config_inclusion?: false, extensions: [ArchLens.Domain]
+
+  architecture do
+    does("fixture contacts, events, and feature flags")
+  end
 
   resources do
     resource(ArchLens.GenFixtures.Contact)

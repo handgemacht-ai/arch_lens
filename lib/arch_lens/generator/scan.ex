@@ -68,7 +68,14 @@ defmodule ArchLens.Generator.Scan do
     end
   end
 
-  defp app_modules(app) do
+  @doc """
+  Every module compiled into `app`, read from its `.app` metadata (never a
+  database). `nil` yields an empty list.
+  """
+  @spec app_modules(atom() | nil) :: [module()]
+  def app_modules(nil), do: []
+
+  def app_modules(app) when is_atom(app) do
     _ = Application.load(app)
 
     case :application.get_key(app, :modules) do

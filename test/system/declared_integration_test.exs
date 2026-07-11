@@ -100,7 +100,8 @@ defmodule ArchLens.System.DeclaredIntegrationTest do
       assert md =~ "## Actors"
       assert md =~ "- **developer** — captures annotations (uses: browser, api, mcp)"
       assert md =~ "## Contexts"
-      assert md =~ "- **accounts** — users and workspaces (modules:"
+      # A central `context` declaration now renders with its origin, not `(modules:)`.
+      assert md =~ "- **accounts** — users and workspaces _(central declaration, deprecated)_"
     end
 
     test "declared_architecture JSON is an object of actors/contexts/warnings" do

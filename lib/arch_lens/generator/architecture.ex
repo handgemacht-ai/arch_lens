@@ -11,12 +11,20 @@ defmodule ArchLens.Generator.Architecture do
   sorted by a stable key and the output carries no timestamp, git SHA, or absolute
   filesystem path.
 
-  ## Completeness gate
+  ## Completeness gates
 
   Generation *fails* — rather than silently rendering an incomplete document —
-  when any Ash resource in scope declares neither a `privacy` block nor
-  `no_personal_data`. `render/1` returns `{:error, {:undeclared_resources, [...]}}`
-  in that case.
+  when any of three gates trips, each naming its offenders:
+
+    * **privacy** — an Ash resource in scope declares neither a `privacy` block nor
+      `no_personal_data` (`{:error, {:undeclared_resources, [...]}}`).
+    * **style** — a top-level directory under the app namespace has no root module
+      `<App>.<Dir>` (`{:error, {:missing_root_modules, [...]}}`); see
+      `ArchLens.Generator.Contexts.style_gate/1`.
+    * **annotation** — a discovered Ash domain or root context module carries no
+      resolvable description and is not excluded
+      (`{:error, {:undescribed_contexts, [...]}}`); see
+      `ArchLens.Generator.Contexts.annotation_gate/1`.
 
   ## Staleness gate
 
@@ -30,13 +38,17 @@ defmodule ArchLens.Generator.Architecture do
   never a database connection.
   """
 
-  alias ArchLens.Generator.{Document, Model, Scope}
+  alias ArchLens.Generator.{Contexts, Document, Model, Scope}
   alias ArchLens.Privacy.Info
 
   @default_artifact "docs/architecture.gen.md"
   @default_json_artifact "docs/architecture.gen.json"
 
-  @type render_error :: {:undeclared_resources, [module()]}
+  @type render_error ::
+          {:undeclared_resources, [module()]}
+          | {:missing_root_modules, [String.t()]}
+          | {:undescribed_contexts, [String.t()]}
+
   @type artifacts :: %{markdown: String.t(), json: String.t()}
 
   @doc "The default committed Markdown artifact path (repo-relative)."
@@ -63,13 +75,11 @@ defmodule ArchLens.Generator.Architecture do
   def render_artifacts(opts \\ []) do
     scope = Scope.resolve(opts)
 
-    case undeclared(scope.resources) do
-      [] ->
-        model = Model.to_map(scope)
-        {:ok, %{markdown: Document.render(model), json: Model.encode(model)}}
-
-      undeclared ->
-        {:error, {:undeclared_resources, undeclared}}
+    with :ok <- privacy_gate(scope),
+         :ok <- Contexts.style_gate(scope),
+         :ok <- Contexts.annotation_gate(scope) do
+      model = Model.to_map(scope)
+      {:ok, %{markdown: Document.render(model), json: Model.encode(model)}}
     end
   end
 
@@ -121,9 +131,23 @@ defmodule ArchLens.Generator.Architecture do
       "Every Ash.Resource in scope must declare a `privacy` block or `no_personal_data`."
   end
 
-  defp undeclared(resources) do
-    resources
-    |> Enum.reject(&Info.declared?/1)
-    |> Enum.sort_by(&Atom.to_string/1)
+  def format_error({:missing_root_modules, names}) do
+    "missing root module(s) for namespace directories: #{Enum.join(names, ", ")}. " <>
+      "Every top-level directory under the app namespace (lib/<app>/<dir>/) must have a root " <>
+      "module <App>.<Dir>; add the module, or list the directory in `ignore_namespaces` of " <>
+      "your ArchLens.System block."
+  end
+
+  def format_error({:undescribed_contexts, names}) do
+    "context description missing for: #{Enum.join(names, ", ")}. " <>
+      "Every Ash domain and root context module must carry an ArchLens.Domain / " <>
+      "ArchLens.Context annotation with a `does` or a `@moduledoc`, or set `exclude: true`."
+  end
+
+  defp privacy_gate(%Scope{resources: resources}) do
+    case Enum.sort_by(Enum.reject(resources, &Info.declared?/1), &Atom.to_string/1) do
+      [] -> :ok
+      undeclared -> {:error, {:undeclared_resources, undeclared}}
+    end
   end
 end

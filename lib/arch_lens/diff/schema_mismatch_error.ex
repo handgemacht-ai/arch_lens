@@ -9,8 +9,9 @@ defmodule ArchLens.Diff.SchemaMismatchError do
 
   @impl true
   def message(%__MODULE__{baseline_version: base, candidate_version: cand}) do
-    "arch_lens.diff: schema_version mismatch — baseline is #{inspect(base)}, " <>
-      "candidate is #{inspect(cand)}. Regenerate both architecture artifacts at the " <>
-      "same arch_lens version before diffing."
+    "arch_lens.diff: schema_version mismatch — the baseline is schema_version " <>
+      "#{inspect(base)} but the candidate is #{inspect(cand)}. A cross-version diff is not " <>
+      "supported: regenerate the committed baseline with `mix arch_lens.gen.architecture` at " <>
+      "the candidate's arch_lens version, commit it, then re-run the diff."
   end
 end

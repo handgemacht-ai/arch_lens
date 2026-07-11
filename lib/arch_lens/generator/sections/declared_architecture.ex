@@ -5,13 +5,18 @@ defmodule ArchLens.Generator.Sections.DeclaredArchitecture do
   collected — the declared-vs-collected gate, one rung above
   `ArchLens.Generator.Retention`.
 
-  `Scope.declared_architecture` is either the structured value produced by
-  `ArchLens.System.Declared` (`%{actors, externals, contexts, warnings}`) or a plain
-  list of generic entries. For the structured value this module renders an
-  **Actors** section and a **Contexts** section (declared *externals* are merged
-  into the External systems section by `ArchLens.Generator.Model`), plus any
-  skipped-validation warnings. Every entry carries `source: "declared"`, distinct
-  from the `collected` things it is checked against.
+  `Scope.declared_architecture` is either the structured value the model assembles
+  (`%{actors, contexts, warnings}`) or a plain list of generic entries. For the
+  structured value this module renders an **Actors** section and a **Contexts**
+  section (declared *externals* are merged into the External systems section by
+  `ArchLens.Generator.Model`), plus any skipped-validation warnings. Every entry
+  carries `source: "declared"`, distinct from the `collected` things it is checked
+  against.
+
+  Contexts are the resolved in-place contexts from `ArchLens.Generator.Contexts`:
+  each renders its name, description, and `origin` (Ash domain, context module, or
+  the deprecated central declaration), and a domain-backed context also lists its
+  resource membership.
   """
 
   @behaviour ArchLens.Generator.Section
@@ -62,7 +67,9 @@ defmodule ArchLens.Generator.Sections.DeclaredArchitecture do
   defp actors_block(actors), do: ["## Actors", "" | Enum.map(actors, &actor_bullet/1)]
 
   defp contexts_block([]), do: []
-  defp contexts_block(contexts), do: ["## Contexts", "" | Enum.map(contexts, &context_bullet/1)]
+
+  defp contexts_block(contexts),
+    do: ["## Contexts", "" | Enum.flat_map(contexts, &context_lines/1)]
 
   defp warnings_block([]), do: []
   defp warnings_block(warnings), do: Enum.map(warnings, &"> validation skipped: #{&1}")
@@ -74,12 +81,27 @@ defmodule ArchLens.Generator.Sections.DeclaredArchitecture do
   defp uses_suffix(uses) when uses in [nil, []], do: ""
   defp uses_suffix(uses), do: " (uses: #{Enum.join(uses, ", ")})"
 
-  defp context_bullet(context) do
-    "- **#{context["name"]}** — #{context["does"]}#{modules_suffix(context["modules"])}"
+  defp context_lines(context) do
+    [
+      "- **#{context["name"]}** — #{context["does"]}#{origin_suffix(context)}"
+      | resource_lines(context)
+    ]
   end
 
-  defp modules_suffix(modules) when modules in [nil, ""], do: ""
-  defp modules_suffix(modules), do: " (modules: `#{modules}`)"
+  defp origin_suffix(context) do
+    case context["origin"] do
+      "domain" -> " _(Ash domain)_"
+      "context_module" -> " _(context module)_"
+      "central_declared" -> " _(central declaration, deprecated)_"
+      _ -> ""
+    end
+  end
+
+  defp resource_lines(%{"resources" => [_ | _] = resources}) do
+    ["  - resources: " <> Enum.map_join(resources, ", ", &"`#{&1}`")]
+  end
+
+  defp resource_lines(_context), do: []
 
   defp put_source(entry) when is_map(entry), do: Map.put_new(entry, "source", "declared")
   defp put_source(entry), do: entry

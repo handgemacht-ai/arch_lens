@@ -22,7 +22,7 @@ defmodule ArchLens.Generator.Model do
 
   alias ArchLens.Collect.ModuleDoc
   alias ArchLens.Edge
-  alias ArchLens.Generator.{Paths, Retention, Scope, Section}
+  alias ArchLens.Generator.{Contexts, Paths, Retention, Scope, Section}
 
   alias ArchLens.Generator.Sections.{
     DeclaredArchitecture,
@@ -34,7 +34,7 @@ defmodule ArchLens.Generator.Model do
   alias ArchLens.Privacy.{Declaration, Info}
   alias ArchLens.System.ExternalMerge
 
-  @schema_version 1
+  @schema_version 2
 
   @doc "The model schema version stamped into every artifact."
   @spec schema_version() :: pos_integer()
@@ -51,9 +51,31 @@ defmodule ArchLens.Generator.Model do
       entry_points: EntryPoints.to_json(scope.entry_points),
       runtime_components: RuntimeComponents.to_json(scope.runtime_components),
       external_systems: ExternalSystems.to_json(external_entries(scope)),
-      declared_architecture: DeclaredArchitecture.to_json(scope.declared_architecture)
+      declared_architecture: DeclaredArchitecture.to_json(declared_architecture(scope))
     }
   end
+
+  # The declared-architecture value the section renders: the central actors and
+  # validation warnings (unchanged), but with contexts resolved from in-place
+  # annotations (`ArchLens.Generator.Contexts`), which fold the deprecated central
+  # declarations in. A plain legacy list with nothing to resolve is passed through
+  # untouched for backward compatibility.
+  defp declared_architecture(%Scope{declared_architecture: central} = scope) do
+    %{contexts: contexts} = Contexts.resolve(scope)
+
+    if is_list(central) and contexts == [] do
+      central
+    else
+      %{
+        actors: declared_field(central, :actors),
+        contexts: contexts,
+        warnings: declared_field(central, :warnings)
+      }
+    end
+  end
+
+  defp declared_field(central, key) when is_map(central), do: Map.get(central, key, [])
+  defp declared_field(_central, _key), do: []
 
   defp external_entries(%Scope{external_systems: collected, declared_architecture: declared}) do
     ExternalMerge.merge(collected, declared_externals(declared))
