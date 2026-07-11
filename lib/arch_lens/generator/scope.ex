@@ -45,10 +45,14 @@ defmodule ArchLens.Generator.Scope do
   alias ArchLens.Edge
   alias ArchLens.Generator.Scan
   alias ArchLens.System.Declared
+  alias ArchLens.System.Info, as: SystemInfo
   alias Ash.Domain.Info, as: DomainInfo
 
   @enforce_keys [:resources]
   defstruct app: nil,
+            app_namespace: nil,
+            modules: [],
+            ignore_namespaces: [],
             domains: [],
             domain_resources: [],
             resources: [],
@@ -61,6 +65,9 @@ defmodule ArchLens.Generator.Scope do
 
   @type t :: %__MODULE__{
           app: atom() | nil,
+          app_namespace: module() | nil,
+          modules: [module()],
+          ignore_namespaces: [atom()],
           domains: [module()],
           domain_resources: [module()],
           resources: [module()],
@@ -98,6 +105,10 @@ defmodule ArchLens.Generator.Scope do
 
     %__MODULE__{
       app: app,
+      app_namespace: Keyword.get_lazy(opts, :app_namespace, fn -> default_namespace(app) end),
+      modules: Keyword.get_lazy(opts, :modules, fn -> Scan.app_modules(app) end),
+      ignore_namespaces:
+        Keyword.get_lazy(opts, :ignore_namespaces, fn -> ignore_namespaces(opts) end),
       domains: domains,
       domain_resources: domain_resources,
       resources: resources,
@@ -154,6 +165,16 @@ defmodule ArchLens.Generator.Scope do
 
   defp ash_domains(nil), do: []
   defp ash_domains(app), do: Application.get_env(app, :ash_domains, [])
+
+  defp default_namespace(nil), do: nil
+  defp default_namespace(app), do: Module.concat([Macro.camelize(Atom.to_string(app))])
+
+  defp ignore_namespaces(opts) do
+    case Keyword.get(opts, :system) do
+      nil -> []
+      system -> SystemInfo.ignore_namespaces(system)
+    end
+  end
 
   defp sort_modules(modules) do
     modules

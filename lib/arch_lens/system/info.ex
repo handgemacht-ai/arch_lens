@@ -23,6 +23,18 @@ defmodule ArchLens.System.Info do
   @spec contexts(system()) :: [Context.t()]
   def contexts(system), do: persisted(system, :arch_lens_contexts)
 
+  @doc """
+  The top-level namespace directory names the style and annotation gates should
+  skip, as declared by `ignore_namespaces` on the `architecture` section (empty
+  when none, or for a non-`ArchLens.System` module).
+  """
+  @spec ignore_namespaces(system()) :: [atom()]
+  def ignore_namespaces(system) when is_atom(system) do
+    if spark_dsl?(system), do: read_ignore_namespaces(system), else: []
+  end
+
+  def ignore_namespaces(system), do: read_ignore_namespaces(system)
+
   @doc "All declared architecture entities grouped by kind."
   @spec architecture(system()) :: %{
           actors: [Actor.t()],
@@ -41,6 +53,10 @@ defmodule ArchLens.System.Info do
   end
 
   defp persisted(system, key), do: Extension.get_persisted(system, key, [])
+
+  defp read_ignore_namespaces(system) do
+    Extension.get_opt(system, [:architecture], :ignore_namespaces, [])
+  end
 
   defp spark_dsl?(module) do
     Code.ensure_loaded?(module) and function_exported?(module, :spark_dsl_config, 0)

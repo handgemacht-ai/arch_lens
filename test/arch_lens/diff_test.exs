@@ -308,6 +308,19 @@ defmodule ArchLens.DiffTest do
         Diff.compute(baseline, candidate)
       end
     end
+
+    test "the message names both versions and tells the caller how to recover" do
+      error =
+        assert_raise ArchLens.Diff.SchemaMismatchError, fn ->
+          Diff.compute(model(%{"schema_version" => 1}), model(%{"schema_version" => 2}))
+        end
+
+      message = Exception.message(error)
+      assert message =~ "schema_version 1"
+      assert message =~ "candidate is 2"
+      assert message =~ "cross-version diff is not"
+      assert message =~ "regenerate the committed baseline"
+    end
   end
 
   describe "input canonicalization" do

@@ -78,6 +78,12 @@ defmodule ArchLens.System.Dsl do
     name: :context,
     describe: """
     A named bounded context of the app.
+
+    **Deprecated.** Prefer annotating the context in place — an `Ash.Domain` with
+    the `ArchLens.Domain` extension, or a plain root module with `use
+    ArchLens.Context`. Central `context` entities still work during migration but
+    emit a deprecation warning at generation time; when a context is both declared
+    here and annotated in place, the in-place annotation wins.
     """,
     examples: [
       ~s|context :accounts, does: "users and workspaces", modules: "MyApp.Accounts"|
@@ -112,6 +118,16 @@ defmodule ArchLens.System.Dsl do
     The declarations are validated against what the generator actually collected —
     an honesty gate one rung above the resource-level privacy declarations.
     """,
+    schema: [
+      ignore_namespaces: [
+        type: {:list, :atom},
+        default: [],
+        doc:
+          "Top-level directory names (snake_cased, e.g. `:fixtures`, `:e2e`) under the app " <>
+            "namespace that the style and annotation gates should skip — genuine support " <>
+            "directories that are not bounded contexts."
+      ]
+    ],
     entities: [@actor, @external, @context]
   }
 
