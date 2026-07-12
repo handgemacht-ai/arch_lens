@@ -1,0 +1,92 @@
+{
+  "app": {
+    "id": "arch_lens",
+    "source": "collected"
+  },
+  "context_dependencies": [
+    {
+      "from": "custom_name",
+      "id": "ctxdep:custom_name->judge",
+      "kind": "context_dependency",
+      "reference_count": 1,
+      "sample": {
+        "file": "lib/arch_lens/ctx_fixtures/renamed/worker.ex",
+        "from_module": "ArchLens.CtxFixtures.Renamed.Worker",
+        "to_module": "ArchLens.CtxFixtures.Judge.Scorer"
+      },
+      "source": "collected",
+      "to": "judge"
+    },
+    {
+      "from": "ingest",
+      "id": "ctxdep:ingest->custom_name",
+      "kind": "context_dependency",
+      "reference_count": 1,
+      "sample": {
+        "file": "lib/arch_lens/ctx_fixtures/ingest/parser.ex",
+        "from_module": "ArchLens.CtxFixtures.Ingest.Parser",
+        "line": 20,
+        "to_module": "ArchLens.CtxFixtures.Renamed.Worker"
+      },
+      "source": "collected",
+      "to": "custom_name"
+    },
+    {
+      "from": "judge",
+      "id": "ctxdep:judge->ingest",
+      "kind": "context_dependency",
+      "reference_count": 2,
+      "sample": {
+        "file": "lib/arch_lens/ctx_fixtures/judge.ex",
+        "from_module": "ArchLens.CtxFixtures.Judge",
+        "line": 5,
+        "to_module": "ArchLens.CtxFixtures.Ingest.Parser"
+      },
+      "source": "collected",
+      "to": "ingest"
+    }
+  ],
+  "data_inventory": [],
+  "decisions": [],
+  "declared_architecture": {
+    "actors": [],
+    "contexts": [
+      {
+        "does": "a context whose name is overridden",
+        "does_source": "annotation",
+        "id": "context:custom_name",
+        "module": "ArchLens.CtxFixtures.Renamed",
+        "name": "custom_name",
+        "origin": "context_module",
+        "provenance": "declared"
+      },
+      {
+        "does": "Ingests raw events from the edge and normalises them.",
+        "does_source": "moduledoc",
+        "id": "context:ingest",
+        "module": "ArchLens.CtxFixtures.Ingest",
+        "name": "ingest",
+        "origin": "context_module",
+        "provenance": "declared"
+      },
+      {
+        "does": "scores copy against the brand judges",
+        "does_source": "annotation",
+        "id": "context:judge",
+        "module": "ArchLens.CtxFixtures.Judge",
+        "name": "judge",
+        "origin": "context_module",
+        "provenance": "declared"
+      }
+    ],
+    "warnings": []
+  },
+  "edges": [],
+  "entry_points": [],
+  "external_systems": [],
+  "flows": [],
+  "oban_workers": [],
+  "resources": [],
+  "runtime_components": [],
+  "schema_version": 3
+}
