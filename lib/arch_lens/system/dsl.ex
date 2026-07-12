@@ -123,9 +123,9 @@ defmodule ArchLens.System.Dsl do
         type: {:list, :atom},
         default: [],
         doc:
-          "Top-level directory names (snake_cased, e.g. `:fixtures`, `:e2e`) under the app " <>
-            "namespace that the style and annotation gates should skip — genuine support " <>
-            "directories that are not bounded contexts."
+          "Top-level directory names (e.g. `:fixtures`, `:e2e`) under the app namespace that " <>
+            "the style and annotation gates should skip — genuine support directories that are " <>
+            "not bounded contexts. Names match leniently, so `:e2e` matches an `E2E` directory."
       ]
     ],
     entities: [@actor, @external, @context]

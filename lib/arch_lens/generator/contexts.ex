@@ -7,8 +7,9 @@ defmodule ArchLens.Generator.Contexts do
 
     1. an `Ash.Domain` carrying the `ArchLens.Domain` extension (`origin: "domain"`,
        with resource membership from `Ash.Domain.Info.resources/1`),
-    2. a plain root context module carrying `use ArchLens.Context`, or merely a
-       `@moduledoc` on the root of a top-level directory (`origin: "context_module"`),
+    2. a plain context module carrying `use ArchLens.Context` (with or without a
+       directory of children — a flat single-file context surfaces too), or merely
+       a `@moduledoc` on the root of a top-level directory (`origin: "context_module"`),
     3. a central `context` entity in an `ArchLens.System` block
        (`origin: "central_declared"`) — the deprecated path.
 
@@ -207,9 +208,11 @@ defmodule ArchLens.Generator.Contexts do
 
   # --- namespace / module analysis ----------------------------------------
 
-  # Root context modules to gate: the existing root modules of non-ignored folder
-  # namespaces, minus the Ash domains and resources (those are gated as domains or
-  # via privacy, not as plain context modules).
+  # Context modules to resolve and gate: the root modules of non-ignored folder
+  # namespaces, unioned with any module carrying a `use ArchLens.Context`
+  # annotation (a flat single-file context has no folder namespace, so the
+  # annotation is what includes it), minus the Ash domains and resources (those
+  # are gated as domains or via privacy, not as plain context modules).
   defp context_modules(scope) do
     case module_set(scope) do
       nil ->
@@ -218,9 +221,7 @@ defmodule ArchLens.Generator.Contexts do
       set ->
         domain_set = MapSet.new(scope.domains)
 
-        scope
-        |> folder_namespaces()
-        |> Enum.map(&root_module(scope, &1))
+        (folder_root_modules(scope) ++ annotated_modules(scope))
         |> Enum.filter(&MapSet.member?(set, &1))
         |> Enum.reject(&MapSet.member?(domain_set, &1))
         |> Enum.reject(&Spark.Dsl.is?(&1, Ash.Domain))
@@ -228,6 +229,20 @@ defmodule ArchLens.Generator.Contexts do
         |> Enum.uniq()
         |> Enum.sort_by(&Edge.module_name/1)
     end
+  end
+
+  defp folder_root_modules(scope) do
+    scope
+    |> folder_namespaces()
+    |> Enum.map(&root_module(scope, &1))
+  end
+
+  # Modules under the app namespace carrying a `use ArchLens.Context` annotation.
+  # Directory shape decides inclusion for the unannotated case; the annotation
+  # decides it here, so a flat single-file context surfaces while an unannotated
+  # single-file module stays invisible and ungated.
+  defp annotated_modules(%Scope{modules: modules}) do
+    Enum.filter(modules, &ContextInfo.annotated?/1)
   end
 
   # The top-level directory segments under the app namespace that actually have
@@ -257,7 +272,15 @@ defmodule ArchLens.Generator.Contexts do
   defp root_module(%Scope{app_namespace: app_ns}, segment), do: Module.concat([app_ns, segment])
 
   defp ignored?(segment, ignore_namespaces) do
-    Macro.underscore(segment) in Enum.map(ignore_namespaces, &to_string/1)
+    normalized = normalize_namespace(segment)
+    Enum.any?(ignore_namespaces, &(normalize_namespace(&1) == normalized))
+  end
+
+  # Fold both an `ignore_namespaces` entry and a directory segment to a form that
+  # ignores internal underscore boundaries, so the intuitive `:e2e` matches the
+  # `E2E` segment that `Macro.underscore/1` would otherwise render as `:e2_e`.
+  defp normalize_namespace(value) do
+    value |> to_string() |> Macro.underscore() |> String.replace("_", "")
   end
 
   # A `MapSet` of the app's modules, or `nil` when the namespace or module list is
