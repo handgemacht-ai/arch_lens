@@ -4,9 +4,12 @@ defmodule ArchLens.Generator.Sections.ExternalSystems do
   parties this app talks to (Stripe, Sentry, mail providers, OpenTelemetry, …),
   as collected and merged by `ArchLens.Collect.Externals`.
 
-  Owns Markdown (`render/1`) and JSON (`to_json/1`) for the collected elements.
-  Each system carries `source: "collected"` and the evidence (dependency, Swoosh
-  adapter, HTTP boundary edge) that surfaced it. Empty in, empty out — no section
+  Owns Markdown (`render/1`) and JSON (`to_json/1`) for the merged elements
+  (`ArchLens.System.ExternalMerge`). Every element carries a `verification`
+  (`corroborated` / `manual` / `ignored`) and its evidence (dependency, Swoosh
+  adapter, HTTP boundary edge, or a `declared_hint` / `manual` entry). A declared
+  or manual external renders its verbatim `does:` purpose; a collected-only
+  (ignored) element gets no invented purpose. Empty in, empty out — no section
   renders while the field is empty.
   """
 
@@ -34,12 +37,40 @@ defmodule ArchLens.Generator.Sections.ExternalSystems do
 
   defp line(entry) when is_map(entry) do
     case get(entry, "vendor") do
-      nil -> Section.bullet(entry)
-      vendor -> "- **#{vendor}**#{category_suffix(entry)}#{evidence_suffix(entry)}"
+      nil -> declared_line(entry)
+      vendor -> collected_line(entry, vendor)
     end
   end
 
   defp line(entry), do: Section.bullet(entry)
+
+  # A declared or manual external: its declared "name → target (via)" label, its
+  # verbatim `does:` purpose, the verification tag, and the corroborating evidence.
+  defp declared_line(entry) do
+    "- #{label(entry)}#{does_suffix(entry)}#{verification_suffix(entry)}#{evidence_suffix(entry)}"
+  end
+
+  # A collected-only (ignored) external: its vendor and category, tagged, with the
+  # evidence that surfaced it — but no invented purpose.
+  defp collected_line(entry, vendor) do
+    "- **#{vendor}**#{category_suffix(entry)}#{verification_suffix(entry)}#{evidence_suffix(entry)}"
+  end
+
+  defp label(entry), do: get(entry, "label") || inspect(entry)
+
+  defp does_suffix(entry) do
+    case get(entry, "does") do
+      does when is_binary(does) and does != "" -> " — #{does}"
+      _does -> ""
+    end
+  end
+
+  defp verification_suffix(entry) do
+    case get(entry, "verification") do
+      verification when is_binary(verification) and verification != "" -> " `#{verification}`"
+      _verification -> ""
+    end
+  end
 
   defp category_suffix(entry) do
     case get(entry, "category") do

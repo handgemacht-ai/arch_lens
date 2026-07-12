@@ -16,14 +16,18 @@ defmodule ArchLens.System.Validate do
        actor uses must also appear among them. Only the cross-check is skipped, with
        a recorded warning, when no entry points were collected — the vocabulary
        check still runs.
-    2. **HTTP externals.** A declared `external via: :http` must corroborate against
-       something the collector actually found — matched the same way
-       `ArchLens.System.ExternalMerge` matches: the declared external's stable id
-       (`external:<slug(name)>`) equals a collected external system's id/vendor slug,
-       *or* the declared target's host equals a host in a collected system's HTTP
-       boundary evidence. A bare name collision with an arbitrary dependency app is
-       **not** enough. Skipped, with a warning, when no external systems were
-       collected.
+    2. **Externals.** Every declared `external(...)`, regardless of transport, must
+       corroborate — delegated to `ArchLens.System.ExternalEvidence.resolve/2`. It
+       is corroborated when its stable id (`external:<slug(name)>`) or its target
+       host matches something the collector found (a bare name collision with an
+       arbitrary dependency app is **not** enough), or when a declared `evidence:`
+       hint resolves (`dep:` a direct dependency, `module:` a real app-module
+       prefix, `host:` a collected HTTP boundary). The escape hatch
+       `evidence: [manual: "reason"]` marks it corroborated-by-assertion (a
+       non-empty reason is required). An unevidenced external — or a declared hint
+       that does not resolve — is an error. This check is never skipped: v3 wires
+       collection everywhere, so "nothing collected" means the external is genuinely
+       unevidenced.
     3. **Context modules.** A context's `modules:` prefix must name at least one
        real module. Skipped, with a warning, when no module list is available.
 
@@ -31,13 +35,16 @@ defmodule ArchLens.System.Validate do
   always produce the same ordered errors and warnings.
   """
 
+  alias ArchLens.Collect.Externals
+  alias ArchLens.System.ExternalEvidence
+
   @entry_point_uses Enum.uniq(ArchLens.Collect.EntryPoints.kinds() ++ [:cron, :channel])
 
   defstruct entry_point_kinds: MapSet.new(),
             entry_points_collected?: false,
             external_ids: MapSet.new(),
             external_targets: MapSet.new(),
-            externals_collected?: false,
+            deps: MapSet.new(),
             known_modules: MapSet.new(),
             modules_known?: false
 
@@ -58,22 +65,25 @@ defmodule ArchLens.System.Validate do
 
   Recognised keys: `:entry_points`, `:external_systems` (the real
   `ArchLens.Collect.Externals` element shape — `%{id, vendor, evidence, …}`),
-  `:known_modules`.
+  `:known_modules`, and `:deps` (the host app's direct dependency names, used to
+  resolve `evidence: [dep: …]` hints; defaults to
+  `ArchLens.Collect.Externals.scanned_dep_names/0` when absent).
   """
   @spec context(map()) :: t()
   def context(inputs) when is_map(inputs) do
     entry_points = Map.get(inputs, :entry_points) || []
     externals = Map.get(inputs, :external_systems) || []
     known = Map.get(inputs, :known_modules) || []
+    deps = Map.get(inputs, :deps) || Externals.scanned_dep_names()
 
     %__MODULE__{
       entry_points_collected?: entry_points != [],
       entry_point_kinds:
         entry_points |> Enum.map(&read(&1, :kind)) |> reject_nil() |> string_set(),
-      externals_collected?: externals != [],
       external_ids:
         externals |> Enum.map(&collected_external_id/1) |> reject_nil() |> MapSet.new(),
       external_targets: externals |> Enum.flat_map(&collected_target_hosts/1) |> MapSet.new(),
+      deps: MapSet.new(deps, &to_string/1),
       known_modules: MapSet.new(known, &to_string/1),
       modules_known?: known != []
     }
@@ -164,44 +174,65 @@ defmodule ArchLens.System.Validate do
     end
   end
 
-  # --- rule (b): HTTP externals -------------------------------------------------
-
-  defp check_externals(acc, externals, %{externals_collected?: false}) do
-    if Enum.any?(externals, &(&1[:via] == :http)) do
-      add_warning(acc, "external systems not collected — skipped external validation.")
-    else
-      acc
-    end
-  end
+  # --- rule (b): externals ------------------------------------------------------
 
   defp check_externals(acc, externals, ctx) do
-    externals
-    |> Enum.filter(&(&1[:via] == :http))
-    |> Enum.reduce(acc, &check_external(&1, &2, ctx))
+    resolve_ctx = resolve_context(ctx)
+    Enum.reduce(externals, acc, &check_external(&1, &2, resolve_ctx))
   end
 
-  defp check_external(external, acc, ctx) do
-    if external_matched?(external, ctx) do
-      acc
-    else
-      add_error(
-        acc,
-        "external #{inspect(external[:name])} (via :http, target #{inspect(external[:target])}) " <>
-          "matches no collected external system or HTTP boundary."
-      )
+  defp check_external(external, acc, resolve_ctx) do
+    case ExternalEvidence.resolve(external, resolve_ctx) do
+      {:corroborated, _evidence} -> acc
+      {:manual, _evidence} -> acc
+      {:unevidenced, detail} -> add_error(acc, external_error(external, detail))
     end
   end
 
-  # Matched the same way ArchLens.System.ExternalMerge collapses declared and
-  # collected externals: by the shared stable id (`external:<slug(name/vendor)>`),
-  # or by the declared target host appearing in a collected system's HTTP boundary
-  # evidence. Deliberately no raw dependency-name match — a name that merely
-  # collides with some app in the OTP closure must not corroborate egress.
-  defp external_matched?(external, ctx) do
-    id = "external:" <> slug(external[:name])
+  defp resolve_context(ctx) do
+    %{
+      external_ids: ctx.external_ids,
+      external_hosts: ctx.external_targets,
+      deps: ctx.deps,
+      known_modules: ctx.known_modules
+    }
+  end
 
-    MapSet.member?(ctx.external_ids, id) or
-      MapSet.member?(ctx.external_targets, target_host(external[:target]))
+  defp external_error(external, :no_evidence) do
+    "#{external_ref(external)} matches no collected external system or HTTP boundary, " <>
+      "and declares no evidence: hint. Add evidence: [dep: :some_dep], [module: \"Prefix\"], " <>
+      "or [host: \"api.example.com\"], or the escape hatch [manual: \"reason\"]."
+  end
+
+  defp external_error(external, {:unresolved_hint, {:dep, dep}}) do
+    "#{external_ref(external)} declares evidence: [dep: #{inspect(dep)}] but that is not a " <>
+      "direct dependency. Name a real direct dep, or use evidence: [manual: \"reason\"]."
+  end
+
+  defp external_error(external, {:unresolved_hint, {:module, prefix}}) do
+    "#{external_ref(external)} declares evidence: [module: #{inspect(prefix)}] but no app " <>
+      "module has that prefix. Name a real module prefix, or use evidence: [manual: \"reason\"]."
+  end
+
+  defp external_error(external, {:unresolved_hint, {:host, host}}) do
+    "#{external_ref(external)} declares evidence: [host: #{inspect(host)}] but no collected " <>
+      "HTTP boundary uses that host. Name a boundary host, or use evidence: [manual: \"reason\"]."
+  end
+
+  defp external_error(external, reason)
+       when reason in [:empty_manual_reason, :manual_needs_reason] do
+    "#{external_ref(external)} declares evidence: [manual: …] without a reason. " <>
+      "Provide a non-empty reason: evidence: [manual: \"why this external is real\"]."
+  end
+
+  defp external_error(external, {:unknown_hint, keys}) do
+    "#{external_ref(external)} declares an unknown evidence: hint #{inspect(keys)}. " <>
+      "Use dep:, module:, host:, or manual:."
+  end
+
+  defp external_ref(external) do
+    "external #{inspect(external[:name])} (via #{inspect(external[:via])}, " <>
+      "target #{inspect(external[:target])})"
   end
 
   # The stable id a collected external system carries, mirroring
