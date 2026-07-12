@@ -268,6 +268,12 @@ defmodule ArchLens.Generator.ModelV3Test do
       assert worker["queue"] == "mailers"
       assert worker["cron"] == []
     end
+
+    test "Markdown decorates each Oban worker line with its queue" do
+      md = populated_opts() |> Scope.resolve() |> Model.to_map() |> Document.render()
+
+      assert md =~ "- `ArchLens.ModelV3Fixtures.Mailer` [queue: mailers]"
+    end
   end
 
   describe "ExternalMerge.merge/3 verification stamp" do

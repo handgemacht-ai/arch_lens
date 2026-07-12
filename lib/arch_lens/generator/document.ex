@@ -152,8 +152,11 @@ defmodule ArchLens.Generator.Document do
   end
 
   defp oban_line(worker) do
-    "- `#{worker[:module]}`#{doc_suffix(worker[:doc])}"
+    "- `#{worker[:module]}`#{queue_decoration(worker[:queue])}#{doc_suffix(worker[:doc])}"
   end
+
+  defp queue_decoration(queue) when is_binary(queue), do: " [queue: #{queue}]"
+  defp queue_decoration(_queue), do: ""
 
   defp doc_suffix(doc) when is_binary(doc), do: " — #{ModuleDoc.first_sentence(doc)}"
   defp doc_suffix(_doc), do: ""
