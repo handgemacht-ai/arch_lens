@@ -3,13 +3,17 @@ defmodule ArchLens.PrivacyTest do
 
   import ExUnit.CaptureIO
 
+  alias ArchLens.Generator.{Document, Model, Scope}
   alias ArchLens.Privacy.{Declaration, Info}
 
   alias ArchLens.TestSupport.{
+    ExemptResource,
     NoPersonalDataResource,
     UndeclaredResource,
     ValidPrivacyResource
   }
+
+  @exempt_reason "legacy import table, no PII collected"
 
   describe "a resource with a valid privacy block" do
     test "Info reads the whole declaration back" do
@@ -40,6 +44,39 @@ defmodule ArchLens.PrivacyTest do
     test "the resource is declared with a :no_personal_data posture" do
       assert Info.declared?(NoPersonalDataResource)
       assert Info.posture(NoPersonalDataResource) == :no_personal_data
+    end
+  end
+
+  describe "a resource that declares privacy_exempt instead of a privacy block" do
+    test "Info reports the exempt reason and carries no declaration" do
+      assert Info.exempt?(ExemptResource)
+      assert Info.exempt_reason(ExemptResource) == @exempt_reason
+      assert Info.declaration(ExemptResource) == nil
+      refute Info.no_personal_data?(ExemptResource)
+    end
+
+    test "the resource is declared with an {:exempt, reason} posture" do
+      assert Info.declared?(ExemptResource)
+      assert Info.posture(ExemptResource) == {:exempt, @exempt_reason}
+    end
+
+    test "generation renders the exempt posture in both the JSON and Markdown artifacts" do
+      scope = Scope.resolve(exempt_scope_opts())
+
+      privacy =
+        scope
+        |> Model.to_json()
+        |> Jason.decode!()
+        |> Map.fetch!("resources")
+        |> Enum.find(&(&1["id"] == "res:" <> inspect(ExemptResource)))
+        |> Map.fetch!("privacy")
+
+      assert privacy == %{"posture" => "exempt", "reason" => @exempt_reason}
+
+      md = scope |> Model.to_map() |> Document.render()
+
+      assert md =~ "### #{inspect(ExemptResource)}"
+      assert md =~ "- **Exempt from classification:** #{@exempt_reason}"
     end
   end
 
@@ -78,5 +115,28 @@ defmodule ArchLens.PrivacyTest do
         end
       end)
     end
+  end
+
+  # A fully-explicit, collector-free scope carrying just the exempt fixture, so
+  # generation is deterministic and no default collector runs.
+  defp exempt_scope_opts do
+    [
+      app: :arch_lens,
+      domains: [],
+      scanned_resources: [ExemptResource],
+      modules: [],
+      edges: [],
+      oban_workers: [],
+      cron: %{},
+      entry_points: [],
+      runtime_components: [],
+      external_systems: [],
+      declared_architecture: [],
+      dependency_refs: [],
+      deps: [],
+      ignore_externals: [],
+      decisions: [],
+      decision_errors: []
+    ]
   end
 end
