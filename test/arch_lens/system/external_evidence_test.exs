@@ -181,6 +181,12 @@ defmodule ArchLens.System.ExternalEvidenceTest do
 
       assert {"manual", ["declared"], []} = ExternalEvidence.stamp(external, nil)
     end
+
+    test "a blank manual reason is rejected and stamps manual with empty evidence" do
+      external = external(name: :docker, target: "docker", evidence_hint: [manual: "   "])
+
+      assert {"manual", ["declared"], []} = ExternalEvidence.stamp(external, nil)
+    end
   end
 
   describe "matches?/2" do
