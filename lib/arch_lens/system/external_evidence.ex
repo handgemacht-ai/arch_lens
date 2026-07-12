@@ -211,8 +211,6 @@ defmodule ArchLens.System.ExternalEvidence do
     end
   end
 
-  defp manual_reason(_hint), do: nil
-
   defp unknown_hint_keys(hint) do
     hint
     |> Enum.map(fn
