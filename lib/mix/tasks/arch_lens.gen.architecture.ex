@@ -45,7 +45,7 @@ defmodule Mix.Tasks.ArchLens.Gen.Architecture do
 
     path = Keyword.get(opts, :output, Architecture.artifact())
 
-    emit([app: app] ++ router_opts(), path, Keyword.get(opts, :check, false))
+    emit([app: app] ++ router_opts() ++ decisions_opts(), path, Keyword.get(opts, :check, false))
   end
 
   # Entry-point collection is host-app-specific: a host app opts in by setting
@@ -57,6 +57,13 @@ defmodule Mix.Tasks.ArchLens.Gen.Architecture do
       nil -> []
       router -> [router: router]
     end
+  end
+
+  # ADR indexing reads `config :arch_lens, :decisions_dir` (default
+  # `docs/decisions`), threaded into the scope so `ArchLens.Collect.Decisions`
+  # scans the right directory relative to the project root.
+  defp decisions_opts do
+    [decisions_dir: Application.get_env(:arch_lens, :decisions_dir, "docs/decisions")]
   end
 
   @doc false

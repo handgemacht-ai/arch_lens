@@ -53,14 +53,20 @@ defmodule ArchLens.Generator.Scope do
             app_namespace: nil,
             modules: [],
             ignore_namespaces: [],
+            ignore_externals: [],
+            deps: [],
             domains: [],
             domain_resources: [],
             resources: [],
             edges: [],
             oban_workers: [],
+            cron: %{},
             entry_points: [],
             runtime_components: [],
             external_systems: [],
+            dependency_refs: [],
+            decisions: [],
+            decision_errors: [],
             declared_architecture: []
 
   @type t :: %__MODULE__{
@@ -68,14 +74,20 @@ defmodule ArchLens.Generator.Scope do
           app_namespace: module() | nil,
           modules: [module()],
           ignore_namespaces: [atom()],
+          ignore_externals: [atom()],
+          deps: [atom()],
           domains: [module()],
           domain_resources: [module()],
           resources: [module()],
           edges: [Edge.t()],
           oban_workers: [module()],
+          cron: %{optional(module()) => [String.t()]},
           entry_points: [term()],
           runtime_components: [term()],
           external_systems: [term()],
+          dependency_refs: [map()],
+          decisions: [map()],
+          decision_errors: [{String.t(), String.t()}],
           declared_architecture: [term()]
         }
 
@@ -103,20 +115,37 @@ defmodule ArchLens.Generator.Scope do
     entry_points = Keyword.get_lazy(opts, :entry_points, fn -> collect_entry_points(opts) end)
     external_systems = Keyword.get(opts, :external_systems, [])
 
+    modules = Keyword.get_lazy(opts, :modules, fn -> Scan.app_modules(app) end)
+
+    decision_scan =
+      Keyword.get_lazy(opts, :decision_scan, fn ->
+        Collect.Decisions.scan(Keyword.get(opts, :decisions_dir))
+      end)
+
     %__MODULE__{
       app: app,
       app_namespace: Keyword.get_lazy(opts, :app_namespace, fn -> default_namespace(app) end),
-      modules: Keyword.get_lazy(opts, :modules, fn -> Scan.app_modules(app) end),
+      modules: modules,
       ignore_namespaces:
         Keyword.get_lazy(opts, :ignore_namespaces, fn -> ignore_namespaces(opts) end),
+      ignore_externals:
+        Keyword.get_lazy(opts, :ignore_externals, fn -> ignore_externals(opts) end),
+      deps: Keyword.get_lazy(opts, :deps, fn -> Collect.Externals.scanned_dep_names() end),
       domains: domains,
       domain_resources: domain_resources,
       resources: resources,
       edges: edges,
       oban_workers: oban_workers,
+      cron: Keyword.get_lazy(opts, :cron, fn -> Collect.Cron.collect(app: app) end),
       entry_points: entry_points,
       runtime_components: Keyword.get(opts, :runtime_components, []),
       external_systems: external_systems,
+      dependency_refs:
+        Keyword.get_lazy(opts, :dependency_refs, fn ->
+          Collect.Dependencies.collect(app: app, modules: modules)
+        end),
+      decisions: Keyword.get(opts, :decisions, decision_scan.decisions),
+      decision_errors: Keyword.get(opts, :decision_errors, decision_scan.errors),
       declared_architecture:
         declared_architecture(
           opts,
@@ -173,6 +202,13 @@ defmodule ArchLens.Generator.Scope do
     case Keyword.get(opts, :system) do
       nil -> []
       system -> SystemInfo.ignore_namespaces(system)
+    end
+  end
+
+  defp ignore_externals(opts) do
+    case Keyword.get(opts, :system) do
+      nil -> []
+      system -> SystemInfo.ignore_externals(system)
     end
   end
 

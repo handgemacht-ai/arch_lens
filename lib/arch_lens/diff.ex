@@ -25,17 +25,22 @@ defmodule ArchLens.Diff do
   ## Severity (WARN) rules
 
     1. A new `:http_boundary` edge or a new external system — new data egress.
-    2. A resource crossing from `no_personal_data` (or undeclared) into a personal
-       `data_category`, or otherwise gaining a personal `data_category`.
-    3. A `data_category` value new to the whole system.
+    2. A resource crossing from `no_personal_data` (or undeclared) into personal
+       `categories`, or otherwise gaining personal `categories`.
+    3. A category value new to the whole system.
     4. A retention-enforcement regression (`enforced` → `declared_not_enforced`),
        or a newly-added personal-data resource without *enforced* retention.
+    5. A classified resource downgraded to a reason-bearing `exempt` posture.
+    6. An external system whose `verification` regresses `corroborated` → `manual`.
+
+  A resource's `categories` are read from the v3 `categories` list, falling back to
+  the deprecated singular `data_category` for not-yet-migrated declarations.
 
   ## Inputs
 
   Both maps are canonicalised on the way in (keys stringified, non-boolean atom
   values stringified), so a map straight from `Model.to_map/1` (atom keys, atom
-  `data_category`) and the same model round-tripped through JSON compare equal.
+  `categories`) and the same model round-tripped through JSON compare equal.
 
   A `nil` baseline means "no baseline existed" (first adoption): every element is
   reported as `added` and `baseline_present: false`. A `schema_version` mismatch
@@ -52,6 +57,10 @@ defmodule ArchLens.Diff do
     external_systems
     runtime_components
     entry_points
+    context_dependencies
+    flows
+    decisions
+    data_inventory
   )
 
   @type severity :: :warn | :info
@@ -234,11 +243,9 @@ defmodule ArchLens.Diff do
 
   # A brand-new resource: personal data widens the surface.
   defp added_reasons(%{group: "resources", entry: entry}, new_categories) do
-    category = data_category(entry)
-
     []
-    # (3) a data_category value new to the whole system.
-    |> prepend_if(category && MapSet.member?(new_categories, category), :new_data_category_value)
+    # (3) a category value new to the whole system.
+    |> prepend_if(new_category?(categories(entry), new_categories), :new_data_category_value)
     # (4) new personal-data resource without enforced retention.
     |> prepend_if(
       personal?(entry) and retention_enforcement(entry) != "enforced",
@@ -249,26 +256,43 @@ defmodule ArchLens.Diff do
   defp added_reasons(_element, _new), do: []
 
   defp changed_reasons("resources", before_entry, after_entry, new_categories) do
-    before_cat = data_category(before_entry)
-    after_cat = data_category(after_entry)
+    before_cats = categories(before_entry)
+    after_cats = categories(after_entry)
 
     []
-    # (2) gaining a personal data_category (incl. no_personal_data -> category).
-    |> prepend_if(is_nil(before_cat) and not is_nil(after_cat), :new_personal_data_category)
-    # (3) a data_category value new to the whole system.
-    |> prepend_if(
-      after_cat && MapSet.member?(new_categories, after_cat),
-      :new_data_category_value
-    )
+    # (2) gaining personal categories (incl. no_personal_data -> categories).
+    |> prepend_if(before_cats == [] and after_cats != [], :new_personal_data_category)
+    # (3) a category value new to the whole system.
+    |> prepend_if(new_category?(after_cats, new_categories), :new_data_category_value)
     # (4) retention-enforcement regression: enforced -> declared_not_enforced.
     |> prepend_if(
       retention_enforcement(before_entry) == "enforced" and
         retention_enforcement(after_entry) == "declared_not_enforced",
       :retention_enforcement_regression
     )
+    # (5) a classified resource downgraded to a reason-bearing exemption.
+    |> prepend_if(
+      posture(before_entry) == "declared" and posture(after_entry) == "exempt",
+      :privacy_classified_to_exempt
+    )
+  end
+
+  # (6) external-evidence regression: a corroborated external drops to manual
+  # (declared without code evidence).
+  defp changed_reasons("external_systems", before_entry, after_entry, _new) do
+    prepend_if(
+      [],
+      Map.get(before_entry, "verification") == "corroborated" and
+        Map.get(after_entry, "verification") == "manual",
+      :external_evidence_regression
+    )
   end
 
   defp changed_reasons(_group, _before, _after, _new), do: []
+
+  defp new_category?(categories, new_categories) do
+    Enum.any?(categories, &MapSet.member?(new_categories, &1))
+  end
 
   defp prepend_if(list, true, reason), do: [reason | list]
   defp prepend_if(list, _falsey, _reason), do: list
@@ -323,7 +347,8 @@ defmodule ArchLens.Diff do
   end
 
   defp fallback_key(entry) do
-    entry["label"] || entry["name"] || Integer.to_string(:erlang.phash2(entry))
+    entry["label"] || entry["name"] || entry["context"] ||
+      Integer.to_string(:erlang.phash2(entry))
   end
 
   defp kind_of("resources", _entry), do: "resource"
@@ -332,23 +357,43 @@ defmodule ArchLens.Diff do
   defp kind_of("external_systems", _entry), do: "external_system"
   defp kind_of("runtime_components", _entry), do: "runtime_component"
   defp kind_of("entry_points", _entry), do: "entry_point"
+  defp kind_of("context_dependencies", _entry), do: "context_dependency"
+  defp kind_of("flows", _entry), do: "data_flow"
+  defp kind_of("decisions", _entry), do: "decision"
+  defp kind_of("data_inventory", _entry), do: "data_inventory"
 
   # --- privacy accessors --------------------------------------------------
 
   defp privacy(entry), do: Map.get(entry, "privacy", %{})
   defp posture(entry), do: entry |> privacy() |> Map.get("posture")
-  defp data_category(entry), do: entry |> privacy() |> Map.get("data_category")
+
+  # The resource's personal-data categories as a list. A v3 declaration carries a
+  # `categories` list; a legacy declaration carries the deprecated singular
+  # `data_category`, read here as a one-element list so both compare identically.
+  defp categories(entry) do
+    priv = privacy(entry)
+
+    case Map.get(priv, "categories") do
+      list when is_list(list) ->
+        Enum.map(list, &to_string/1)
+
+      _ ->
+        case Map.get(priv, "data_category") do
+          nil -> []
+          category -> [to_string(category)]
+        end
+    end
+  end
 
   defp retention_enforcement(entry),
     do: entry |> privacy() |> Map.get("retention", %{}) |> Map.get("enforcement")
 
-  defp personal?(entry), do: posture(entry) == "declared" and not is_nil(data_category(entry))
+  defp personal?(entry), do: posture(entry) == "declared" and categories(entry) != []
 
   defp category_set(model) do
     model
     |> Map.get("resources", [])
-    |> Enum.map(&data_category/1)
-    |> Enum.reject(&is_nil/1)
+    |> Enum.flat_map(&categories/1)
     |> MapSet.new()
   end
 

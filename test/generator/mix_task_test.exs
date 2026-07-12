@@ -36,7 +36,7 @@ defmodule Mix.Tasks.ArchLens.Gen.ArchitectureTest do
     assert File.read!(path) == markdown
     assert File.read!(json_path) == json
     assert File.read!(path) =~ "# Architecture"
-    assert Jason.decode!(File.read!(json_path))["schema_version"] == 2
+    assert Jason.decode!(File.read!(json_path))["schema_version"] == 3
   end
 
   test "a :router option threads collected entry points into both artifacts", %{

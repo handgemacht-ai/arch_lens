@@ -230,11 +230,11 @@ defmodule ArchLens.Generator.ContextsTest do
     end
   end
 
-  describe "schema v2 JSON model" do
+  describe "schema v3 JSON model" do
     test "declared_architecture.contexts serialise with name/does/origin/does_source" do
       json = scope([]) |> Model.to_map() |> Model.encode() |> Jason.decode!()
 
-      assert json["schema_version"] == 2
+      assert json["schema_version"] == 3
 
       contexts = json["declared_architecture"]["contexts"]
 

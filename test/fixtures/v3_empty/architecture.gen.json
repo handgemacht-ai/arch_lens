@@ -1,0 +1,18 @@
+{
+  "app": {
+    "id": "arch_lens",
+    "source": "collected"
+  },
+  "context_dependencies": [],
+  "data_inventory": [],
+  "decisions": [],
+  "declared_architecture": [],
+  "edges": [],
+  "entry_points": [],
+  "external_systems": [],
+  "flows": [],
+  "oban_workers": [],
+  "resources": [],
+  "runtime_components": [],
+  "schema_version": 3
+}

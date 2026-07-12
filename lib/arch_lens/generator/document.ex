@@ -13,6 +13,11 @@ defmodule ArchLens.Generator.Document do
   alias ArchLens.Collect.ModuleDoc
 
   alias ArchLens.Generator.Sections.{
+    App,
+    ContextDependencies,
+    DataFlows,
+    DataInventory,
+    Decisions,
     DeclaredArchitecture,
     EntryPoints,
     ExternalSystems,
@@ -68,6 +73,14 @@ defmodule ArchLens.Generator.Document do
   defp doc_lines(doc) when is_binary(doc), do: ["_#{ModuleDoc.first_sentence(doc)}_", ""]
   defp doc_lines(_doc), do: []
 
+  defp posture_lines(%{posture: "declared", categories: categories} = privacy) do
+    [
+      "- Categories: `#{Enum.join(categories, ", ")}`",
+      "- Legal basis: `#{inspect(privacy[:legal_basis])}`",
+      retention_line(privacy[:retention])
+    ]
+  end
+
   defp posture_lines(%{posture: "declared"} = privacy) do
     [
       "- Data category: `#{inspect(privacy[:data_category])}`",
@@ -77,6 +90,11 @@ defmodule ArchLens.Generator.Document do
   end
 
   defp posture_lines(%{posture: "no_personal_data"}), do: ["- No personal data."]
+
+  defp posture_lines(%{posture: "exempt"} = privacy) do
+    ["- **Exempt from classification:** #{privacy[:reason]}"]
+  end
+
   defp posture_lines(%{posture: "undeclared"}), do: ["- **Undeclared privacy posture.**"]
 
   defp retention_line(%{enforcement: "enforced", policy: policy} = retention) do
@@ -140,12 +158,19 @@ defmodule ArchLens.Generator.Document do
   defp doc_suffix(doc) when is_binary(doc), do: " — #{ModuleDoc.first_sentence(doc)}"
   defp doc_suffix(_doc), do: ""
 
+  # Optional sections in a fixed, deterministic order; each renders `[]` (and is
+  # dropped) when its field is empty.
   defp optional_sections(model) do
     [
       EntryPoints.render(model[:entry_points]),
       RuntimeComponents.render(model[:runtime_components]),
       ExternalSystems.render(model[:external_systems]),
-      DeclaredArchitecture.render(model[:declared_architecture])
+      ContextDependencies.render(model[:context_dependencies]),
+      DataFlows.render(model[:flows]),
+      DataInventory.render(model[:data_inventory]),
+      DeclaredArchitecture.render(model[:declared_architecture]),
+      Decisions.render(model[:decisions]),
+      App.render(model[:app])
     ]
     |> Enum.reject(&(&1 == []))
   end

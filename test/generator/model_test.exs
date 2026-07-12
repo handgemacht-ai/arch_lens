@@ -74,8 +74,8 @@ defmodule ArchLens.Generator.ModelTest do
   end
 
   describe "schema + provenance" do
-    test "the model stamps schema_version 2" do
-      assert decoded()["schema_version"] == 2
+    test "the model stamps schema_version 3" do
+      assert decoded()["schema_version"] == 3
     end
 
     test "every element carries a source: declared privacy rows, collected edges/workers" do

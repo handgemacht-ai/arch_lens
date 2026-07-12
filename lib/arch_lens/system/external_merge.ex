@@ -15,7 +15,36 @@ defmodule ArchLens.System.ExternalMerge do
 
   When there are no declared externals the collected list is returned untouched, so
   a scope with no `ArchLens.System` renders byte-identically to before.
+
+  `merge/3` additionally threads `:ignore_externals` and `:deps` context and stamps
+  each element with a `verification` (`corroborated` / `manual` / `ignored`). This
+  is the wave-2 skeleton stamp — derived from the element's `provenance` alone; the
+  wave-3 externals slice fleshes the three-state evidence logic (declared-without-
+  evidence gate, detected-without-declaration gate, resolved `evidence:` hints).
   """
+
+  @doc """
+  Merge `collected` external systems with `declared` externals, threading `opts`
+  (`:ignore_externals`, `:deps`) and stamping a `verification` on each element.
+
+  Skeleton stamp — `verification` is derived from the element's `provenance`
+  (`["collected","declared"]` → `corroborated`; `["declared"]` → `manual`;
+  `["collected"]` → `ignored`). Fleshed by the externals slice.
+  """
+  @spec merge([map()], [map()], keyword()) :: [map()]
+  def merge(collected, declared, _opts) do
+    collected
+    |> merge(declared)
+    |> Enum.map(&stamp_verification/1)
+  end
+
+  defp stamp_verification(element) do
+    Map.put(element, :verification, verification_of(Map.get(element, :provenance)))
+  end
+
+  defp verification_of(["collected", "declared"]), do: "corroborated"
+  defp verification_of(["declared"]), do: "manual"
+  defp verification_of(_provenance), do: "ignored"
 
   @doc "Merge `collected` external systems with `declared` externals."
   @spec merge([map()], [map()]) :: [map()]

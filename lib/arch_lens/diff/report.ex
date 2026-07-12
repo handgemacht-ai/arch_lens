@@ -19,7 +19,9 @@ defmodule ArchLens.Diff.Report do
     new_personal_data_category: "resource now holds personal data",
     new_data_category_value: "new data category for the whole system",
     retention_enforcement_regression: "retention no longer enforced",
-    unenforced_new_personal_data: "new personal-data resource without enforced retention"
+    unenforced_new_personal_data: "new personal-data resource without enforced retention",
+    privacy_classified_to_exempt: "classified resource downgraded to exempt",
+    external_evidence_regression: "external no longer corroborated by code evidence"
   }
 
   @doc "The stable HTML marker CI greps for to upsert the same PR comment."
