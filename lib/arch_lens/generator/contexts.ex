@@ -37,6 +37,7 @@ defmodule ArchLens.Generator.Contexts do
   alias ArchLens.Context.Info, as: ContextInfo
   alias ArchLens.Domain
   alias ArchLens.Edge
+  alias ArchLens.Generator.Namespace
   alias ArchLens.Generator.Scope
   alias Ash.Domain.Info, as: DomainInfo
 
@@ -44,6 +45,11 @@ defmodule ArchLens.Generator.Contexts do
 
   @doc """
   The resolved, deterministic context list for `scope`, sorted by name.
+
+  Each context carries an `id` (`"context:<name>"`, the stable id edges, flow steps,
+  and diffs join on) and, for an in-place context, the annotated `module`
+  (`ArchLens.Generator.Namespace` attributes modules to contexts through it). A
+  deprecated central declaration has no resolvable module, so it carries no `module`.
 
   Excluded and undescribed candidates are dropped; central declarations that
   collide with an in-place annotation are dropped with a warning; any central
@@ -76,8 +82,8 @@ defmodule ArchLens.Generator.Contexts do
       set ->
         missing =
           scope
-          |> folder_namespaces()
-          |> Enum.map(&root_module(scope, &1))
+          |> Namespace.folder_namespaces()
+          |> Enum.map(&Namespace.root_module(scope, &1))
           |> Enum.reject(&MapSet.member?(set, &1))
           |> Enum.map(&Edge.module_name/1)
           |> Enum.sort()
@@ -116,9 +122,12 @@ defmodule ArchLens.Generator.Contexts do
 
   defp domain_context(domain) do
     {does, source} = Domain.does(domain)
+    name = Domain.name(domain)
 
     %{
-      name: Domain.name(domain),
+      id: context_id(name),
+      name: name,
+      module: domain,
       does: does,
       origin: :domain,
       provenance: :declared,
@@ -137,9 +146,12 @@ defmodule ArchLens.Generator.Contexts do
 
   defp module_context(module) do
     {does, source} = ContextInfo.does(module)
+    name = ContextInfo.name(module)
 
     %{
-      name: ContextInfo.name(module),
+      id: context_id(name),
+      name: name,
+      module: module,
       does: does,
       origin: :context_module,
       provenance: :declared,
@@ -157,8 +169,11 @@ defmodule ArchLens.Generator.Contexts do
   defp central_contexts(_scope), do: []
 
   defp central_context(context) do
+    name = read(context, :name)
+
     %{
-      name: read(context, :name),
+      id: context_id(name),
+      name: name,
       does: read(context, :does),
       origin: :central_declared,
       provenance: :declared,
@@ -233,8 +248,8 @@ defmodule ArchLens.Generator.Contexts do
 
   defp folder_root_modules(scope) do
     scope
-    |> folder_namespaces()
-    |> Enum.map(&root_module(scope, &1))
+    |> Namespace.folder_namespaces()
+    |> Enum.map(&Namespace.root_module(scope, &1))
   end
 
   # Modules under the app namespace carrying a `use ArchLens.Context` annotation.
@@ -243,44 +258,6 @@ defmodule ArchLens.Generator.Contexts do
   # single-file module stays invisible and ungated.
   defp annotated_modules(%Scope{modules: modules}) do
     Enum.filter(modules, &ContextInfo.annotated?/1)
-  end
-
-  # The top-level directory segments under the app namespace that actually have
-  # children — a segment `Seg` such that some module is `<App>.Seg.X...`. Ignored
-  # segments (`ignore_namespaces`) are dropped.
-  defp folder_namespaces(%Scope{app_namespace: app_ns, modules: modules} = scope) do
-    base = Module.split(app_ns)
-
-    modules
-    |> Enum.flat_map(&child_segment(base, &1))
-    |> Enum.uniq()
-    |> Enum.reject(&ignored?(&1, scope.ignore_namespaces))
-    |> Enum.sort()
-  end
-
-  defp child_segment(base, module) do
-    case remainder(base, Module.split(module)) do
-      [segment, _ | _] -> [segment]
-      _ -> []
-    end
-  end
-
-  defp remainder(base, segments) do
-    if List.starts_with?(segments, base), do: Enum.drop(segments, length(base)), else: nil
-  end
-
-  defp root_module(%Scope{app_namespace: app_ns}, segment), do: Module.concat([app_ns, segment])
-
-  defp ignored?(segment, ignore_namespaces) do
-    normalized = normalize_namespace(segment)
-    Enum.any?(ignore_namespaces, &(normalize_namespace(&1) == normalized))
-  end
-
-  # Fold both an `ignore_namespaces` entry and a directory segment to a form that
-  # ignores internal underscore boundaries, so the intuitive `:e2e` matches the
-  # `E2E` segment that `Macro.underscore/1` would otherwise render as `:e2_e`.
-  defp normalize_namespace(value) do
-    value |> to_string() |> Macro.underscore() |> String.replace("_", "")
   end
 
   # A `MapSet` of the app's modules, or `nil` when the namespace or module list is
@@ -306,6 +283,8 @@ defmodule ArchLens.Generator.Contexts do
 
     Enum.reverse(kept)
   end
+
+  defp context_id(name), do: "context:" <> to_string(name)
 
   defp read(context, key), do: Map.get(context, key) || Map.get(context, to_string(key))
 
