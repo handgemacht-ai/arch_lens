@@ -10,7 +10,31 @@ defmodule ArchLens.SystemIntegrationFixtures.App do
   architecture do
     actor(:developer, uses: [:browser, :api, :mcp], does: "captures annotations")
     external(:stripe, via: :http, target: "https://api.stripe.com", does: "billing")
-    external(:otel, via: :otlp, target: "http://collector:4317", does: "traces")
+
+    external(:otel,
+      via: :otlp,
+      target: "http://collector:4317",
+      does: "traces",
+      evidence: [manual: "exports traces to the OTLP collector"]
+    )
+
+    context(:accounts,
+      does: "users and workspaces",
+      modules: "ArchLens.SystemIntegrationFixtures.Accounts"
+    )
+  end
+end
+
+# A System with no externals, for the skipped-validation-warning scenarios: v3
+# validates every declared external against collected code, so a fixture that
+# declares an uncollected http external could not also demonstrate the entry-point
+# and module-list skip warnings under "nothing collected".
+defmodule ArchLens.SystemIntegrationFixtures.WarningsApp do
+  @moduledoc false
+  use ArchLens.System
+
+  architecture do
+    actor(:developer, uses: [:browser, :api, :mcp], does: "captures annotations")
 
     context(:accounts,
       does: "users and workspaces",
@@ -26,7 +50,7 @@ defmodule ArchLens.System.DeclaredIntegrationTest do
   alias ArchLens.Collect.Externals
   alias ArchLens.Generator.{Document, Model, Scope}
   alias ArchLens.System.{Declared, ValidationError}
-  alias ArchLens.SystemIntegrationFixtures.App
+  alias ArchLens.SystemIntegrationFixtures.{App, WarningsApp}
 
   @collected [
     entry_points: [
@@ -56,11 +80,13 @@ defmodule ArchLens.System.DeclaredIntegrationTest do
     end
 
     test "records skipped-validation warnings when nothing was collected" do
-      declared = Declared.resolve!(App, %{})
+      # v3 wires collection everywhere: the externals check is no longer skipped
+      # when nothing was collected. WarningsApp declares no externals, so resolve!
+      # succeeds and still surfaces the entry-point and module-list skip warnings.
+      declared = Declared.resolve!(WarningsApp, %{})
 
       assert declared.warnings != []
       assert Enum.any?(declared.warnings, &(&1 =~ "entry points not collected"))
-      assert Enum.any?(declared.warnings, &(&1 =~ "external systems not collected"))
       assert Enum.any?(declared.warnings, &(&1 =~ "module list unavailable"))
     end
 
@@ -117,8 +143,11 @@ defmodule ArchLens.System.DeclaredIntegrationTest do
     end
 
     test "skipped-validation warnings surface in both artifacts" do
-      opts = scope_opts(entry_points: [], external_systems: [], known_modules: [])
-      # external_systems empty + no collected → externals become declared-only, no error.
+      # WarningsApp declares no externals, so nothing collected still resolves and
+      # the entry-point + module-list skip warnings surface in both artifacts.
+      opts =
+        scope_opts(system: WarningsApp, entry_points: [], external_systems: [], known_modules: [])
+
       model = opts |> Scope.resolve() |> Model.to_map()
 
       md = Document.render(model)

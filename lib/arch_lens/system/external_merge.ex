@@ -4,78 +4,74 @@ defmodule ArchLens.System.ExternalMerge do
   *collected* external systems into one element per external.
 
   A declared external collapses with a collected external system when they share an
-  identity — the same normalized `target`, or the same stable `id` (declared
-  externals derive `external:<slug(name)>`, which the collector already stamps as
-  `external:<slug(vendor)>`, so the same third party lines up regardless of which
-  side carried a URL). A collapsed element carries *both* evidences
-  (`provenance: ["collected", "declared"]`); an external seen from only one side
-  keeps that single provenance. Every element carries a stable `id`, so the merged
-  `external_systems` array is one coherent, id-keyed schema the diff can key on. The
-  result is deterministic: elements are sorted by target, then id, then name.
+  identity (`ArchLens.System.ExternalEvidence.matches?/2`): the same stable `id`
+  (declared externals derive `external:<slug(name)>`, which the collector already
+  stamps as `external:<slug(vendor)>`), the same normalized `target`, or the same
+  target host — so one clean `external(target: host)` declaration collapses an ugly
+  host-derived collected vendor. A collapsed element carries the collected
+  evidence and `provenance: ["collected", "declared"]`; an external seen from only
+  one side keeps that single provenance.
 
-  When there are no declared externals the collected list is returned untouched, so
-  a scope with no `ArchLens.System` renders byte-identically to before.
+  Every element carries exactly one `verification`, stamped by
+  `ArchLens.System.ExternalEvidence.stamp/2`:
 
-  `merge/3` additionally threads `:ignore_externals` and `:deps` context and stamps
-  each element with a `verification` (`corroborated` / `manual` / `ignored`). This
-  is the wave-2 skeleton stamp — derived from the element's `provenance` alone; the
-  wave-3 externals slice fleshes the three-state evidence logic (declared-without-
-  evidence gate, detected-without-declaration gate, resolved `evidence:` hints).
+    * `corroborated` — declared and backed by collected code evidence or a resolved
+      `evidence:` hint (`provenance: ["collected", "declared"]`).
+    * `manual` — declared with the `evidence: [manual: "reason"]` escape hatch, no
+      code evidence (`provenance: ["declared"]`; the reason is the evidence).
+    * `ignored` — collected but not declared, tagged so it still renders rather than
+      being silently dropped (`provenance: ["collected"]`). By the time generation
+      renders, `ExternalEvidence.gate/1` has already failed any collected external
+      that is neither declared nor listed in `ignore_externals`, so a collected-only
+      element that reaches here is an ignored one.
+
+  The result is deterministic: elements are sorted by target, then id, then name.
+  `merge/3` accepts (and ignores) the `:ignore_externals` and `:deps` options — the
+  ignore list is enforced by the completeness gate, and hint resolution by the
+  validation gate; the stamp trusts both.
   """
+
+  alias ArchLens.System.ExternalEvidence
 
   @doc """
-  Merge `collected` external systems with `declared` externals, threading `opts`
-  (`:ignore_externals`, `:deps`) and stamping a `verification` on each element.
-
-  Skeleton stamp — `verification` is derived from the element's `provenance`
-  (`["collected","declared"]` → `corroborated`; `["declared"]` → `manual`;
-  `["collected"]` → `ignored`). Fleshed by the externals slice.
+  Merge `collected` external systems with `declared` externals, stamping a
+  `verification` on each element.
   """
   @spec merge([map()], [map()], keyword()) :: [map()]
+  def merge(collected, declared, opts \\ [])
+
+  def merge(collected, [], _opts), do: Enum.map(collected, &collected_element/1)
+
   def merge(collected, declared, _opts) do
-    collected
-    |> merge(declared)
-    |> Enum.map(&stamp_verification/1)
-  end
-
-  defp stamp_verification(element) do
-    Map.put(element, :verification, verification_of(Map.get(element, :provenance)))
-  end
-
-  defp verification_of(["collected", "declared"]), do: "corroborated"
-  defp verification_of(["declared"]), do: "manual"
-  defp verification_of(_provenance), do: "ignored"
-
-  @doc "Merge `collected` external systems with `declared` externals."
-  @spec merge([map()], [map()]) :: [map()]
-  def merge(collected, []), do: collected
-
-  def merge(collected, declared) do
-    declared_key_set = declared |> Enum.flat_map(&declared_keys/1) |> MapSet.new()
-    collected_key_set = collected |> Enum.flat_map(&collected_keys/1) |> MapSet.new()
-
     declared_elements =
       Enum.map(declared, fn external ->
-        declared_element(external, intersects?(declared_keys(external), collected_key_set))
+        matched = Enum.find(collected, &ExternalEvidence.matches?(external, &1))
+        declared_element(external, matched)
       end)
 
     collected_only =
       collected
-      |> Enum.reject(&intersects?(collected_keys(&1), declared_key_set))
+      |> Enum.reject(fn element ->
+        Enum.any?(declared, &ExternalEvidence.matches?(&1, element))
+      end)
       |> Enum.map(&collected_element/1)
 
     Enum.sort_by(declared_elements ++ collected_only, &sort_key/1)
   end
 
-  defp declared_element(external, also_collected?) do
+  defp declared_element(external, matched) do
+    {verification, provenance, evidence} = ExternalEvidence.stamp(external, matched)
+
     %{
       id: declared_id(external),
       name: external[:name],
       via: external[:via],
       target: external[:target],
       does: external[:does],
-      source: if(also_collected?, do: "collected", else: "declared"),
-      provenance: if(also_collected?, do: ["collected", "declared"], else: ["declared"]),
+      source: if(matched, do: "collected", else: "declared"),
+      provenance: provenance,
+      verification: verification,
+      evidence: evidence,
       label: declared_label(external)
     }
   end
@@ -84,28 +80,12 @@ defmodule ArchLens.System.ExternalMerge do
     entry
     |> Map.put_new(:id, collected_id(entry))
     |> Map.put_new(:source, "collected")
-    |> Map.put_new(:provenance, ["collected"])
+    |> Map.put(:provenance, ["collected"])
+    |> Map.put(:verification, "ignored")
     |> Map.put_new(:label, collected_label(entry))
   end
 
-  # --- identity ---------------------------------------------------------------
-
-  defp intersects?(keys, key_set), do: Enum.any?(keys, &MapSet.member?(key_set, &1))
-
-  defp declared_keys(external) do
-    ["id:" <> declared_id(external) | target_keys(external[:target])]
-  end
-
-  defp collected_keys(entry) do
-    ["id:" <> collected_id(entry) | target_keys(read(entry, :target))]
-  end
-
-  defp target_keys(target) do
-    case target_key(target) do
-      "" -> []
-      key -> ["tgt:" <> key]
-    end
-  end
+  # --- identity -----------------------------------------------------------------
 
   defp declared_id(external), do: "external:" <> slug(external[:name])
 

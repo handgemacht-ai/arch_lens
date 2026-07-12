@@ -155,12 +155,16 @@ defmodule ArchLens.System.ValidateTest do
       assert message =~ "external :jason"
     end
 
-    test "skips with a warning when no external systems were collected" do
+    # v3 removes the v2 skip-with-warning leniency: collection is wired everywhere,
+    # so "nothing collected" means the external is genuinely unevidenced and fails
+    # unless it carries an `evidence:` hint.
+    test "fails when nothing was collected and the external has no evidence hint" do
       declared = declared(externals: [external(:stripe, "https://api.stripe.com")])
       ctx = Validate.context(%{external_systems: []})
 
-      assert {:ok, [warning]} = Validate.validate(declared, ctx)
-      assert warning =~ "external systems not collected"
+      assert {:error, [message]} = Validate.validate(declared, ctx)
+      assert message =~ "external :stripe"
+      assert message =~ "no evidence: hint"
     end
   end
 
