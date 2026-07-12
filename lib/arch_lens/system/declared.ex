@@ -24,16 +24,31 @@ defmodule ArchLens.System.Declared do
           actors: [map()],
           externals: [map()],
           contexts: [map()],
+          flows: [map()],
+          identity: map() | nil,
           warnings: [String.t()]
         }
 
-  @doc "Normalized, `source: \"declared\"` maps for a System module (no validation)."
-  @spec build(module()) :: %{actors: [map()], externals: [map()], contexts: [map()]}
+  @doc """
+  Normalized, `source: "declared"` maps for a System module (no validation).
+
+  Flows and the town identity are carried raw — the generator resolves and gates
+  them (`ArchLens.Generator.Flows`, `ArchLens.Town`), not this module.
+  """
+  @spec build(module()) :: %{
+          actors: [map()],
+          externals: [map()],
+          contexts: [map()],
+          flows: [map()],
+          identity: map() | nil
+        }
   def build(system) do
     %{
       actors: system |> Info.actors() |> Enum.map(&actor_map/1),
       externals: system |> Info.externals() |> Enum.map(&external_map/1),
-      contexts: system |> Info.contexts() |> Enum.map(&context_map/1)
+      contexts: system |> Info.contexts() |> Enum.map(&context_map/1),
+      flows: system |> Info.flows() |> Enum.map(&flow_map/1),
+      identity: system |> Info.identity() |> identity_map()
     }
   end
 
@@ -67,12 +82,32 @@ defmodule ArchLens.System.Declared do
       via: external.via,
       target: external.target,
       does: external.does,
+      evidence_hint: external.evidence,
       source: "declared"
     }
   end
 
   defp context_map(context) do
     %{name: context.name, does: context.does, modules: context.modules, source: "declared"}
+  end
+
+  defp flow_map(flow) do
+    %{
+      name: flow.name,
+      does: flow.does,
+      steps: Enum.map(flow.steps, &step_map/1),
+      source: "declared"
+    }
+  end
+
+  defp step_map(step) do
+    %{kind: step.kind, ref: step.ref, does: step.does, unverified: step.unverified}
+  end
+
+  defp identity_map(nil), do: nil
+
+  defp identity_map(identity) do
+    %{id: identity.id, name: identity.name, aliases: identity.aliases, source: "declared"}
   end
 
   defp collection_inputs(inputs) do

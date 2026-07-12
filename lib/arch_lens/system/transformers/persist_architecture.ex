@@ -9,11 +9,15 @@ defmodule ArchLens.System.Transformers.PersistArchitecture do
     * `:arch_lens_actors` — sorted `ArchLens.System.Actor` structs.
     * `:arch_lens_externals` — sorted `ArchLens.System.External` structs.
     * `:arch_lens_contexts` — sorted `ArchLens.System.Context` structs.
+    * `:arch_lens_flows` — `ArchLens.System.Flow` structs sorted by name (each flow's
+      steps keep declaration order).
+    * `:arch_lens_identity` — the single declared `ArchLens.System.Identity` struct,
+      or `nil`; more than one is rejected.
   """
 
   use Spark.Dsl.Transformer
 
-  alias ArchLens.System.{Actor, Context, External}
+  alias ArchLens.System.{Actor, Context, External, Flow, Identity}
   alias Spark.Dsl.Transformer
   alias Spark.Error.DslError
 
@@ -29,21 +33,38 @@ defmodule ArchLens.System.Transformers.PersistArchitecture do
       |> Enum.sort_by(&{to_string(&1.via), &1.target, to_string(&1.name)})
 
     contexts = entities |> only(Context) |> Enum.sort_by(&to_string(&1.name))
+    flows = entities |> only(Flow) |> Enum.sort_by(&to_string(&1.name))
+    identities = only(entities, Identity)
 
     with :ok <- ensure_unique(dsl_state, :actor, actors),
          :ok <- ensure_unique(dsl_state, :external, externals),
-         :ok <- ensure_unique(dsl_state, :context, contexts) do
+         :ok <- ensure_unique(dsl_state, :context, contexts),
+         :ok <- ensure_unique(dsl_state, :flow, flows),
+         :ok <- ensure_single_identity(dsl_state, identities) do
       dsl_state =
         dsl_state
         |> Transformer.persist(:arch_lens_actors, actors)
         |> Transformer.persist(:arch_lens_externals, externals)
         |> Transformer.persist(:arch_lens_contexts, contexts)
+        |> Transformer.persist(:arch_lens_flows, flows)
+        |> Transformer.persist(:arch_lens_identity, List.first(identities))
 
       {:ok, dsl_state}
     end
   end
 
   defp only(entities, struct), do: Enum.filter(entities, &is_struct(&1, struct))
+
+  defp ensure_single_identity(_dsl_state, identities) when length(identities) <= 1, do: :ok
+
+  defp ensure_single_identity(dsl_state, _identities) do
+    {:error,
+     DslError.exception(
+       module: Transformer.get_persisted(dsl_state, :module),
+       path: [:architecture, :identity],
+       message: "at most one identity may be declared."
+     )}
+  end
 
   defp ensure_unique(dsl_state, kind, entities) do
     duplicates =
