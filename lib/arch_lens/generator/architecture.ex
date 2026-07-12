@@ -25,6 +25,15 @@ defmodule ArchLens.Generator.Architecture do
       resolvable description and is not excluded
       (`{:error, {:undescribed_contexts, [...]}}`); see
       `ArchLens.Generator.Contexts.annotation_gate/1`.
+    * **externals** — a collected external system is neither declared nor ignored
+      (`{:error, {:undeclared_externals, [...]}}`); see
+      `ArchLens.System.ExternalEvidence`.
+    * **decisions** — an ADR under the decisions directory has malformed
+      front-matter (`{:error, {:invalid_decisions, [...]}}`); see
+      `ArchLens.Collect.Decisions`.
+    * **flows** — a declared data flow references a missing element or an unbacked
+      adjacency (`{:error, {:invalid_flows, [...]}}`); see
+      `ArchLens.Generator.Flows`.
 
   ## Staleness gate
 
@@ -38,8 +47,9 @@ defmodule ArchLens.Generator.Architecture do
   never a database connection.
   """
 
-  alias ArchLens.Generator.{Contexts, Document, Model, Scope}
+  alias ArchLens.Generator.{Contexts, Document, Flows, Model, Scope}
   alias ArchLens.Privacy.Info
+  alias ArchLens.System.ExternalEvidence
 
   @default_artifact "docs/architecture.gen.md"
   @default_json_artifact "docs/architecture.gen.json"
@@ -48,6 +58,9 @@ defmodule ArchLens.Generator.Architecture do
           {:undeclared_resources, [module()]}
           | {:missing_root_modules, [String.t()]}
           | {:undescribed_contexts, [String.t()]}
+          | {:undeclared_externals, [String.t()]}
+          | {:invalid_decisions, [{String.t(), String.t()}]}
+          | {:invalid_flows, [term()]}
 
   @type artifacts :: %{markdown: String.t(), json: String.t()}
 
@@ -77,7 +90,10 @@ defmodule ArchLens.Generator.Architecture do
 
     with :ok <- privacy_gate(scope),
          :ok <- Contexts.style_gate(scope),
-         :ok <- Contexts.annotation_gate(scope) do
+         :ok <- Contexts.annotation_gate(scope),
+         :ok <- externals_gate(scope),
+         :ok <- decisions_gate(scope),
+         :ok <- Flows.gate(scope) do
       model = Model.to_map(scope)
       {:ok, %{markdown: Document.render(model), json: Model.encode(model)}}
     end
@@ -144,10 +160,53 @@ defmodule ArchLens.Generator.Architecture do
       "ArchLens.Context annotation with a `does` or a `@moduledoc`, or set `exclude: true`."
   end
 
+  def format_error({:undeclared_externals, vendors}) do
+    "collected external system(s) without a declaration: #{Enum.join(vendors, ", ")}. " <>
+      "Declare each with an `external(...)` in your ArchLens.System `architecture` block, " <>
+      "or list it in `ignore_externals`."
+  end
+
+  def format_error({:invalid_decisions, offenders}) do
+    lines = Enum.map_join(offenders, "; ", fn {path, reason} -> "#{path} — #{reason}" end)
+
+    "invalid architecture decision record(s): #{lines}. " <>
+      "Every `docs/decisions/NNNN-slug.md` needs a well-formed front-matter block " <>
+      "(`title`, `status`, `date`)."
+  end
+
+  def format_error({:invalid_flows, offenders}) do
+    "invalid data flow(s): #{Enum.join(offenders, ", ")}. " <>
+      "Every flow step must resolve to a real entry point, context, or external, and " <>
+      "each adjacency must be backed by evidence or marked `unverified: true`."
+  end
+
   defp privacy_gate(%Scope{resources: resources}) do
     case Enum.sort_by(Enum.reject(resources, &Info.declared?/1), &Atom.to_string/1) do
       [] -> :ok
       undeclared -> {:error, {:undeclared_resources, undeclared}}
     end
   end
+
+  # The externals completeness gate — delegated to the feature-owned
+  # `ArchLens.System.ExternalEvidence` (a skeleton `:ok` stub until the externals
+  # slice fleshes the detected-without-declaration check).
+  defp externals_gate(%Scope{} = scope) do
+    ExternalEvidence.gate(%{
+      collected: scope.external_systems,
+      declared: declared_externals(scope),
+      ignore_externals: scope.ignore_externals,
+      deps: scope.deps
+    })
+  end
+
+  defp declared_externals(%Scope{declared_architecture: %{externals: externals}})
+       when is_list(externals),
+       do: externals
+
+  defp declared_externals(_scope), do: []
+
+  # The decisions validity gate: every indexed ADR is a well-formed, honestly
+  # indexable record (parse errors collected by `ArchLens.Collect.Decisions`).
+  defp decisions_gate(%Scope{decision_errors: []}), do: :ok
+  defp decisions_gate(%Scope{decision_errors: errors}), do: {:error, {:invalid_decisions, errors}}
 end
