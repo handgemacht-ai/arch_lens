@@ -5,6 +5,29 @@ defmodule ArchLens.Collect.EntryPointsTest do
   alias ArchLens.Collect.EntryPoints
   alias ArchLens.Generator.{Document, Model, Scope}
 
+  defmodule CronMailer do
+    @moduledoc false
+    use Oban.Worker, queue: :mailers
+
+    @impl Oban.Worker
+    def perform(_job), do: :ok
+  end
+
+  defmodule ReportChannel do
+    @moduledoc false
+  end
+
+  # A user socket that exposes the `__channels__/0` list the channel collector reads.
+  defmodule ReportSocket do
+    @moduledoc false
+    def __channels__, do: [{"reports:*", ArchLens.Collect.EntryPointsTest.ReportChannel}]
+  end
+
+  # Deterministic collector seams via the escape hatches: an explicit Oban crontab
+  # (no loaded app needed) and an explicit socket list (no Phoenix endpoint needed).
+  @crontab [oban_config: [plugins: [{Oban.Plugins.Cron, crontab: [{"0 3 * * *", CronMailer}]}]]]
+  @socket_opts [sockets: [{"/socket", ReportSocket}]]
+
   defp by_kind(entries), do: Map.new(entries, &{&1.kind, &1})
 
   describe "collect/1 — real Phoenix router via Phoenix.Router.routes/1" do
@@ -290,6 +313,66 @@ defmodule ArchLens.Collect.EntryPointsTest do
 
     test "generating the model twice from the same router is byte-identical" do
       assert Model.to_json(scope()) == Model.to_json(scope())
+    end
+  end
+
+  describe "Scope.resolve auto-folds cron and channel entry points" do
+    defp folded_scope(extra) do
+      Scope.resolve([domains: [], scanned_resources: [], edges: [], oban_workers: []] ++ extra)
+    end
+
+    test "a cron crontab contributes :cron entry points with no router" do
+      [entry] = folded_scope(@crontab).entry_points
+
+      assert entry.kind == :cron
+      assert entry.id == "cron:0 3 * * *:ArchLens.Collect.EntryPointsTest.CronMailer"
+      assert entry.queue == "mailers"
+    end
+
+    test "declared sockets contribute :channel entry points with no router" do
+      [entry] = folded_scope(@socket_opts).entry_points
+
+      assert entry.kind == :channel
+      assert entry.topic == "reports:*"
+      assert entry.handler == "ArchLens.Collect.EntryPointsTest.ReportChannel"
+    end
+
+    test "router, cron, and channel entries fold into one deduplicated inventory" do
+      kinds =
+        ([router: ArchLens.CollectFixtures.Router] ++ @crontab ++ @socket_opts)
+        |> folded_scope()
+        |> Map.fetch!(:entry_points)
+        |> Enum.map(& &1.kind)
+        |> Enum.uniq()
+        |> Enum.sort()
+
+      assert kinds == [:api, :browser, :channel, :cron, :mcp, :oauth, :webhook]
+    end
+
+    test "an app with no router, cron, or channels folds to an empty inventory" do
+      assert folded_scope([]).entry_points == []
+    end
+
+    test "an explicit :entry_points value still wins over the folded seams" do
+      resolved = folded_scope([entry_points: [%{label: "explicit"}]] ++ @crontab ++ @socket_opts)
+
+      assert resolved.entry_points == [%{label: "explicit"}]
+    end
+
+    test "the folded inventory is deterministic across resolves" do
+      opts = [router: ArchLens.CollectFixtures.Router] ++ @crontab ++ @socket_opts
+
+      assert Model.to_json(folded_scope(opts)) == Model.to_json(folded_scope(opts))
+    end
+
+    test "Markdown renders the Cron and Channel groups from the folded seams" do
+      md = (@crontab ++ @socket_opts) |> folded_scope() |> Model.to_map() |> Document.render()
+
+      assert md =~ "### Cron (1)"
+      assert md =~ "- `0 3 * * *` →"
+      assert md =~ "[queue: mailers]"
+      assert md =~ "### Channel (1)"
+      assert md =~ "- `reports:*` →"
     end
   end
 end
