@@ -1,10 +1,41 @@
 defmodule ArchLens.Generator.Scan do
   @moduledoc """
-  DB-free discovery of the modules the generator reports on.
+  DB-free discovery of the *production* modules the generator reports on.
 
   Enumerates an OTP application's compiled module list (read from its `.app`
   metadata via `:application.get_key/2`, never a database) and filters it down to
-  Ash resources and Oban workers.
+  the modules whose compiled source lives under the project's `lib/` directory —
+  the app's production code. Ash resources and Oban workers are then selected from
+  that production set.
+
+  ## Why lib-only
+
+  Under `MIX_ENV=test` a host app compiles extra `elixirc_paths` (typically
+  `test/support`) into the *same* OTP application, so `:application.get_key/2`
+  returns those test-support modules alongside the real `lib/` modules. Left
+  unfiltered they leak into architecture discovery and the generation gates: a
+  `test/support` module shaped like a context (a `@moduledoc` on a directory root,
+  with children) surfaces as a bounded context, and an Ash resource defined in
+  `test/support` surfaces in the inventory — present under `:test` but absent under
+  `:dev`. The generated artifact then differs by environment, which permanently
+  trips the `--check` staleness gate in CI (dev-generated committed artifacts never
+  carry the test-only content).
+
+  Restricting the scan to modules whose compiled source is under `lib/` makes the
+  scan — and therefore every artifact and every gate derived from it — environment
+  independent: the module set is identical whether generation runs under `:dev` or
+  `:test`, because the only modules the two environments disagree on are exactly the
+  extra `elixirc_paths` this filter removes.
+
+  A module whose compiled source cannot be resolved (no `:source` in its compile
+  metadata, or it cannot be loaded) is treated as non-production and excluded; a
+  genuine `lib/` module always carries a source, so this only drops synthetic or
+  dynamically-defined modules that have no place in an architecture inventory.
+
+  The lib-only boundary is applied at this app-scan seam only. Explicitly supplied
+  module lists (`ash_resources_from_modules/1`, `oban_workers_from_modules/1`, and
+  the `:modules`/`:scanned_resources`/`:oban_workers` overrides on
+  `ArchLens.Generator.Scope`) are trusted as-is — the caller owns that scope.
 
   The plain module scan is deliberately independent of any domain's `resources`
   block. A resource that is *embedded* in another resource — and therefore absent
@@ -17,7 +48,7 @@ defmodule ArchLens.Generator.Scan do
   alias Ash.Resource.Info, as: ResourceInfo
 
   @doc """
-  Every Ash resource compiled into `app`, sorted by module name.
+  Every Ash resource in `app`'s production code (`lib/`), sorted by module name.
 
   `nil` yields an empty list so callers can pass an unresolved app without a
   guard.
@@ -43,7 +74,7 @@ defmodule ArchLens.Generator.Scan do
   end
 
   @doc """
-  Every Oban worker compiled into `app`, sorted by module name.
+  Every Oban worker in `app`'s production code (`lib/`), sorted by module name.
 
   Always empty when Oban is not loadable, so a scanned app with Oban absent — or
   present but with zero jobs registered — renders cleanly.
@@ -69,13 +100,37 @@ defmodule ArchLens.Generator.Scan do
   end
 
   @doc """
-  Every module compiled into `app`, read from its `.app` metadata (never a
-  database). `nil` yields an empty list.
+  Every *production* module compiled into `app` — the modules whose compiled source
+  lives under the project's `lib/` directory — read from the app's `.app` metadata
+  (never a database) and filtered to `lib/`. See the moduledoc for why the scan is
+  lib-only. `nil` yields an empty list.
   """
   @spec app_modules(atom() | nil) :: [module()]
   def app_modules(nil), do: []
 
   def app_modules(app) when is_atom(app) do
+    app |> loaded_modules() |> lib_only()
+  end
+
+  @doc """
+  Keeps only the *production* modules in `modules`: those whose compiled source
+  lives under `lib_root` (defaulting to the current project's `lib/` directory,
+  `Path.expand("lib", File.cwd!())`). A module with no resolvable compiled source is
+  excluded. See the moduledoc for the environment-independence rationale.
+
+  For a nested-root project (the Mix project lives in a subdirectory, e.g.
+  eval-lab's `app/`), `File.cwd!()` is that subdirectory when generation runs, so
+  the default `lib_root` is `<subdir>/lib` — the correct production root.
+  """
+  @spec lib_only([module()], String.t()) :: [module()]
+  def lib_only(modules, lib_root \\ project_lib_root()) do
+    Enum.filter(modules, &under_lib?(&1, lib_root))
+  end
+
+  # The raw compiled module list from the app's `.app` metadata, before the
+  # lib-only production filter. Under MIX_ENV=test this includes the extra
+  # elixirc_paths (test/support) compiled into the same application.
+  defp loaded_modules(app) do
     _ = Application.load(app)
 
     case :application.get_key(app, :modules) do
@@ -83,6 +138,29 @@ defmodule ArchLens.Generator.Scan do
       _ -> []
     end
   end
+
+  defp under_lib?(module, lib_root) do
+    case module_source(module) do
+      nil -> false
+      source -> String.starts_with?(source, lib_root <> "/")
+    end
+  end
+
+  defp module_source(module) when is_atom(module) do
+    with {:module, ^module} <- Code.ensure_loaded(module),
+         source when is_list(source) or is_binary(source) <-
+           module.__info__(:compile)[:source] do
+      source |> to_string() |> Path.expand()
+    else
+      _ -> nil
+    end
+  rescue
+    _ -> nil
+  end
+
+  defp module_source(_), do: nil
+
+  defp project_lib_root, do: Path.expand("lib", File.cwd!())
 
   defp ash_resource?(module) when is_atom(module) do
     Code.ensure_loaded?(module) and ResourceInfo.resource?(module)

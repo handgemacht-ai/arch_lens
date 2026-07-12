@@ -93,14 +93,24 @@ defmodule Mix.Tasks.ArchLens.Gen.ArchitectureTest do
     end
   end
 
-  test "generation fails (non-zero) when the scanned app has an undeclared resource", %{
-    path: path,
-    json_path: json_path
-  } do
-    # Running against :arch_lens in test env scans the undeclared test-support
-    # fixture, so the completeness gate aborts the task before writing anything.
+  test "generation fails (non-zero) and writes nothing when a scanned resource is undeclared",
+       %{path: path, json_path: json_path} do
+    # The completeness (privacy) gate aborts the task before writing anything.
+    #
+    # This previously drove the abort through `Task.run` scanning :arch_lens, which
+    # only tripped because the undeclared test-support fixture leaked into the
+    # MIX_ENV=test module list — exactly the environment-dependent leak this change
+    # removes. Now that the app scan is lib-only, :arch_lens no longer surfaces that
+    # fixture, so the abort path is exercised with an explicit undeclared resource:
+    # deterministic and independent of the ambient MIX_ENV.
+    opts = [
+      scanned_resources: [ArchLens.TestSupport.UndeclaredResource],
+      edges: [],
+      oban_workers: []
+    ]
+
     assert_raise Mix.Error, ~r/privacy declaration missing/, fn ->
-      Task.run(["--output", path])
+      Task.emit(opts, path, false)
     end
 
     refute File.exists?(path)
