@@ -1,0 +1,8 @@
+{
+  "apps": [
+    { "artifact": "../../havi/docs/architecture.gen.json" },
+    { "artifact": "../../claude-code-course/docs/architecture.gen.json" },
+    { "artifact": "../../eval-lab/app/docs/architecture.gen.json" }
+  ],
+  "output": "docs/town-architecture.gen.md"
+}

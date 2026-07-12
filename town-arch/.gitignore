@@ -1,0 +1,8 @@
+# town-arch is a thin wrapper around arch_lens; its build tree is disposable.
+# The committed source of truth is mix.exs, town-arch.manifest.json, and the
+# generated docs/town-architecture.gen.{md,json}. Everything below is regenerated
+# by `mix deps.get` / `mix compile` / `mix arch_lens.town.map`.
+/_build/
+/deps/
+/mix.lock
+erl_crash.dump
