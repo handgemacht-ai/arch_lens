@@ -23,8 +23,11 @@ defmodule ArchLens.Collect.EntryPoints do
 
   ## Classification
 
-  Each route is classified into one of `#{inspect(~w(browser api webhook oauth mcp other)a)}`
-  by a fixed-precedence heuristic (most specific first):
+  A *route* is classified into one of `#{inspect(~w(browser api webhook oauth mcp other)a)}`
+  by a fixed-precedence heuristic (most specific first); the `:cron` and `:channel`
+  kinds are contributed by the sibling `ArchLens.Collect.Cron` /
+  `ArchLens.Collect.Channels` collectors, not by route classification, so
+  `kinds/0` (the canonical render/sort order) lists them after `:mcp`:
 
     * `:mcp` — an `/mcp` path segment, or a forward targeting an MCP/Hermes plug.
     * `:oauth` — an `oauth` pipeline/path segment, or an OAuth-named plug.
@@ -55,7 +58,7 @@ defmodule ArchLens.Collect.EntryPoints do
 
   alias ArchLens.Edge
 
-  @kinds ~w(browser api webhook oauth mcp other)a
+  @kinds ~w(browser api webhook oauth mcp cron channel other)a
 
   @doc "The entry-point kinds, in the canonical render/sort order."
   @spec kinds() :: [atom()]
@@ -245,21 +248,30 @@ defmodule ArchLens.Collect.EntryPoints do
   defp handler_name(route, true), do: route |> live_module() |> module_name()
   defp handler_name(route, false), do: module_name(route.plug)
 
+  # A LiveView route's module lives in `metadata[:phoenix_live_view]` (real Phoenix
+  # 1.8 stores `{LiveViewModule, action, …}` there while `plug_opts` is the *action*
+  # atom, not the module). Reading metadata first is the fix: matching `plug_opts`
+  # first mislabelled the handler as the action atom. Only when metadata carries no
+  # module do we fall back to a module in `plug_opts` (older/synthetic routes), then
+  # to the plug itself.
   defp live_module(route) do
-    case route.plug_opts do
-      module when is_atom(module) and not is_nil(module) -> module
-      tuple when is_tuple(tuple) and is_atom(elem(tuple, 0)) -> elem(tuple, 0)
-      _ -> live_module_from_metadata(route)
-    end
+    live_module_from_metadata(route) || plug_opts_module(route.plug_opts) || route.plug
   end
 
   defp live_module_from_metadata(route) do
     case Map.get(route.metadata, :phoenix_live_view) do
       tuple when is_tuple(tuple) and is_atom(elem(tuple, 0)) -> elem(tuple, 0)
-      module when is_atom(module) -> module
-      _ -> route.plug
+      module when is_atom(module) and not is_nil(module) -> module
+      _ -> nil
     end
   end
+
+  defp plug_opts_module(module) when is_atom(module) and not is_nil(module), do: module
+
+  defp plug_opts_module(tuple) when is_tuple(tuple) and is_atom(elem(tuple, 0)),
+    do: elem(tuple, 0)
+
+  defp plug_opts_module(_plug_opts), do: nil
 
   defp action_name(route, false) do
     case route.plug_opts do
@@ -268,7 +280,19 @@ defmodule ArchLens.Collect.EntryPoints do
     end
   end
 
-  defp action_name(_route, true), do: nil
+  # A LiveView route's action is the second element of the
+  # `{LiveViewModule, action, …}` metadata tuple. A synthetic route whose
+  # `plug_opts` holds the module (not an action) and carries no metadata tuple
+  # yields no action.
+  defp action_name(route, true) do
+    case Map.get(route.metadata, :phoenix_live_view) do
+      tuple when is_tuple(tuple) and tuple_size(tuple) >= 2 -> action_atom(elem(tuple, 1))
+      _ -> nil
+    end
+  end
+
+  defp action_atom(action) when is_atom(action) and not is_nil(action), do: Atom.to_string(action)
+  defp action_atom(_action), do: nil
 
   defp module_name(nil), do: nil
   defp module_name(module) when is_atom(module), do: Edge.module_name(module)

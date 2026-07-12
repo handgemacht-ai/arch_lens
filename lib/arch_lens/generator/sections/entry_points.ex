@@ -20,13 +20,15 @@ defmodule ArchLens.Generator.Sections.EntryPoints do
 
   @heading "## Entry points"
 
-  @kind_order ~w(browser api webhook oauth mcp other)
+  @kind_order ~w(browser api webhook oauth mcp cron channel other)
   @kind_titles %{
     "browser" => "Browser",
     "api" => "API",
     "webhook" => "Webhook",
     "oauth" => "OAuth",
     "mcp" => "MCP",
+    "cron" => "Cron",
+    "channel" => "Channel",
     "other" => "Other"
   }
 
@@ -64,31 +66,67 @@ defmodule ArchLens.Generator.Sections.EntryPoints do
   end
 
   defp bullet(entry) do
-    method = entry["method"]
-    path = entry["path"]
+    case lead(entry) do
+      nil -> Section.bullet(entry)
+      lead -> "- #{lead} → #{handler_label(entry)}#{attribution_suffix(entry)}"
+    end
+  end
 
-    if is_binary(method) and is_binary(path) do
-      "- `#{method} #{path}` → #{handler_label(entry)}#{basis_suffix(entry)}"
-    else
-      Section.bullet(entry)
+  # The leading code-span of a bullet: a route's method+path, a cron entry's
+  # verbatim schedule, or a channel entry's topic pattern. `nil` for an entry with
+  # none of these (a hand-supplied passthrough), which falls back to Section.bullet.
+  defp lead(entry) do
+    cond do
+      entry["kind"] == "cron" and is_binary(entry["schedule"]) ->
+        "`#{entry["schedule"]}`"
+
+      entry["kind"] == "channel" and is_binary(entry["topic"]) ->
+        "`#{entry["topic"]}`"
+
+      is_binary(entry["method"]) and is_binary(entry["path"]) ->
+        "`#{entry["method"]} #{entry["path"]}`"
+
+      true ->
+        nil
     end
   end
 
   defp handler_label(entry) do
     handler = entry["handler"] || "—"
 
-    case entry["action"] do
-      action when is_binary(action) -> "#{handler}##{action}"
-      _ -> handler
-    end
+    base =
+      case entry["action"] do
+        action when is_binary(action) -> "#{handler}##{action}"
+        _ -> handler
+      end
+
+    base <> queue_suffix(entry)
   end
 
-  defp basis_suffix(entry) do
-    case entry["basis"] do
-      basis when is_binary(basis) -> " — _#{basis}_"
+  defp queue_suffix(entry) do
+    case {entry["kind"], entry["queue"]} do
+      {"cron", queue} when is_binary(queue) -> " [queue: #{queue}]"
       _ -> ""
     end
   end
+
+  # The attributed context and the classification basis, italicised:
+  # ` — _<context> · <basis>_`. Context is the attributed bounded context, or
+  # "Unattributed" when null; the basis is dropped when the element carries none.
+  defp attribution_suffix(entry) do
+    parts = [context_label(entry) | basis_part(entry["basis"])]
+    " — _#{Enum.join(parts, " · ")}_"
+  end
+
+  defp context_label(entry) do
+    case entry["context"] do
+      name when is_binary(name) -> name
+      _ -> "Unattributed"
+    end
+  end
+
+  defp basis_part(basis) when is_binary(basis), do: [basis]
+  defp basis_part(_basis), do: []
 
   defp summary_line(entries) do
     kinds = entries |> Enum.map(&kind_of/1) |> Enum.uniq() |> length()
@@ -105,7 +143,8 @@ defmodule ArchLens.Generator.Sections.EntryPoints do
   defp kind_of(entry), do: entry["kind"] || "other"
 
   defp sort_key(entry),
-    do: {kind_index(kind_of(entry)), entry["method"] || "", entry["path"] || ""}
+    do:
+      {kind_index(kind_of(entry)), entry["method"] || "", entry["path"] || "", entry["id"] || ""}
 
   defp kind_index(kind), do: Enum.find_index(@kind_order, &(&1 == kind)) || length(@kind_order)
 
