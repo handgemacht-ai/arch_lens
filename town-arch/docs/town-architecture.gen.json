@@ -1,0 +1,246 @@
+{
+  "apps": [
+    {
+      "aliases": [
+        "ccc",
+        "claude-code-course",
+        "claude.handgemacht.ai"
+      ],
+      "counts": {
+        "actors": 6,
+        "contexts": 22,
+        "entry_points": 45,
+        "external_systems": 5,
+        "oban_workers": 0,
+        "resources": 26
+      },
+      "id": "claude_code_course",
+      "name": "Claude Code Course",
+      "source_schema_version": 3
+    },
+    {
+      "aliases": [
+        "eval_lab",
+        "eval-lab"
+      ],
+      "counts": {
+        "actors": 3,
+        "contexts": 13,
+        "entry_points": 59,
+        "external_systems": 3,
+        "oban_workers": 5,
+        "resources": 20
+      },
+      "id": "eval_lab",
+      "name": "Eval Lab",
+      "source_schema_version": 3
+    },
+    {
+      "aliases": [
+        "havi",
+        "havi.handgemacht.ai"
+      ],
+      "counts": {
+        "actors": 5,
+        "contexts": 15,
+        "entry_points": 81,
+        "external_systems": 5,
+        "oban_workers": 2,
+        "resources": 14
+      },
+      "id": "havi",
+      "name": "HAVI",
+      "source_schema_version": 3
+    }
+  ],
+  "kind": "town_map",
+  "links": [
+    {
+      "basis": "declared_external",
+      "does": "annotation read-back API the facts-review admin pages query for open-comment counts",
+      "from": "claude_code_course",
+      "from_external_id": "external:havi",
+      "id": "link:claude_code_course=>havi:external:havi",
+      "kind": "http",
+      "matched_on": "havi",
+      "provenance": [
+        "collected",
+        "declared"
+      ],
+      "to": "havi",
+      "to_endpoint": {
+        "handler": "HaviWeb.AnnotationController",
+        "kind": "api",
+        "method": "GET",
+        "path": "/api/annotations"
+      }
+    }
+  ],
+  "schema_version": 1,
+  "unresolved_externals": [
+    {
+      "app": "claude_code_course",
+      "evidence": [
+        {
+          "type": "http_boundary",
+          "value": "https://api.brevo.com"
+        }
+      ],
+      "external_id": "external:brevo",
+      "target": "https://api.brevo.com"
+    },
+    {
+      "app": "claude_code_course",
+      "evidence": [
+        {
+          "type": "manual",
+          "value": "spawned as a `claude -p` subprocess via System.cmd in ClaudeCodeCourse.ClaudeCLI; no HTTP boundary or dependency vendor for the collector to detect"
+        }
+      ],
+      "external_id": "external:claude",
+      "target": "claude -p"
+    },
+    {
+      "app": "claude_code_course",
+      "evidence": [
+        {
+          "type": "dep",
+          "value": "ash_knowledge_graph"
+        }
+      ],
+      "external_id": "external:jina",
+      "target": "https://api.jina.ai"
+    },
+    {
+      "app": "claude_code_course",
+      "evidence": [
+        {
+          "type": "dep",
+          "value": "stripity_stripe"
+        }
+      ],
+      "external_id": "external:stripe",
+      "target": "https://api.stripe.com"
+    },
+    {
+      "app": "eval_lab",
+      "evidence": [
+        {
+          "source": "declared_hint",
+          "type": "module",
+          "value": "EvalLab.Ports.Docker"
+        }
+      ],
+      "external_id": "external:docker",
+      "target": "docker"
+    },
+    {
+      "app": "eval_lab",
+      "evidence": [
+        {
+          "source": "declared_hint",
+          "type": "module",
+          "value": "EvalLab.Ports.Dolt"
+        }
+      ],
+      "external_id": "external:dolt",
+      "target": "dolt"
+    },
+    {
+      "app": "eval_lab",
+      "evidence": [
+        {
+          "source": "declared_hint",
+          "type": "module",
+          "value": "EvalLab.Ports.Git"
+        }
+      ],
+      "external_id": "external:git",
+      "target": "git"
+    },
+    {
+      "app": "havi",
+      "evidence": [
+        {
+          "source": "config/config.exs",
+          "type": "swoosh_adapter",
+          "value": "Swoosh.Adapters.Brevo"
+        }
+      ],
+      "external_id": "external:brevo",
+      "target": "https://api.brevo.com"
+    },
+    {
+      "app": "havi",
+      "evidence": [
+        {
+          "type": "http_boundary",
+          "value": "https://api.cloudflare.com"
+        }
+      ],
+      "external_id": "external:cloudflare",
+      "target": "https://api.cloudflare.com"
+    },
+    {
+      "app": "havi",
+      "evidence": [
+        {
+          "type": "dep",
+          "value": "opentelemetry"
+        },
+        {
+          "type": "dep",
+          "value": "opentelemetry_api"
+        },
+        {
+          "type": "dep",
+          "value": "opentelemetry_bandit"
+        },
+        {
+          "type": "dep",
+          "value": "opentelemetry_ecto"
+        },
+        {
+          "type": "dep",
+          "value": "opentelemetry_exporter"
+        },
+        {
+          "type": "dep",
+          "value": "opentelemetry_phoenix"
+        },
+        {
+          "type": "dep",
+          "value": "opentelemetry_semantic_conventions"
+        }
+      ],
+      "external_id": "external:opentelemetry",
+      "vendor": "OpenTelemetry"
+    },
+    {
+      "app": "havi",
+      "evidence": [
+        {
+          "type": "dep",
+          "value": "sentry"
+        }
+      ],
+      "external_id": "external:sentry",
+      "target": "https://sentry.io"
+    },
+    {
+      "app": "havi",
+      "evidence": [
+        {
+          "type": "dep",
+          "value": "stripity_stripe"
+        },
+        {
+          "type": "http_boundary",
+          "value": "https://api.stripe.com"
+        }
+      ],
+      "external_id": "external:stripe",
+      "target": "https://api.stripe.com"
+    }
+  ]
+}
