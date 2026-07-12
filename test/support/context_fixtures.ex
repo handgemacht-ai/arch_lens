@@ -154,6 +154,38 @@ defmodule ArchLens.CtxFixtures.Bare.Thing do
   def thing, do: :ok
 end
 
+# --- flat single-file context modules (no directory of children) ------------
+
+# A flat context whose `does` comes from an explicit annotation.
+defmodule ArchLens.CtxFixtures.Blog do
+  @moduledoc "A moduledoc the explicit annotation `does` overrides."
+  use ArchLens.Context, does: "publishes posts and manages drafts"
+end
+
+# A flat context described only by its `@moduledoc` (annotated, does: omitted).
+defmodule ArchLens.CtxFixtures.RateLimiter do
+  @moduledoc "Throttles inbound requests per workspace."
+  use ArchLens.Context
+end
+
+# A flat annotated context with a `name:` override.
+defmodule ArchLens.CtxFixtures.OAuth2Server do
+  @moduledoc false
+  use ArchLens.Context, name: :oauth2_server, does: "issues OAuth 2.1 bearer tokens"
+end
+
+# A flat annotated context excluded from the model.
+defmodule ArchLens.CtxFixtures.FlatExcluded do
+  @moduledoc false
+  use ArchLens.Context, exclude: true
+end
+
+# A flat UNannotated single-file module — must stay invisible and never be gated.
+defmodule ArchLens.CtxFixtures.Loose do
+  @moduledoc false
+  def loose, do: :ok
+end
+
 # A folder (`Orphan`) with a child but NO root module — the style-gate offender.
 defmodule ArchLens.CtxFixtures.Orphan.Thing do
   @moduledoc false
@@ -165,6 +197,13 @@ end
 defmodule ArchLens.CtxFixtures.Fixtures.Helper do
   @moduledoc false
   def help, do: :ok
+end
+
+# A folder (`E2E`) whose mixed-case name `Macro.underscore`s to `e2_e`. The
+# intuitive `:e2e` in `ignore_namespaces` must still excuse it from the style gate.
+defmodule ArchLens.CtxFixtures.E2E.Spec do
+  @moduledoc false
+  def spec, do: :ok
 end
 
 defmodule ArchLens.CtxFixtures do

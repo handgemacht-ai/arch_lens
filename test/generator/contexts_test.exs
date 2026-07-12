@@ -8,7 +8,21 @@ defmodule ArchLens.Generator.ContextsTest do
   import ExUnit.CaptureIO
 
   alias ArchLens.CtxFixtures
-  alias ArchLens.CtxFixtures.{Accounts, Bare, Fixtures, Orphan, Undescribed}
+
+  alias ArchLens.CtxFixtures.{
+    Accounts,
+    Bare,
+    Blog,
+    E2E,
+    Fixtures,
+    FlatExcluded,
+    Loose,
+    OAuth2Server,
+    Orphan,
+    RateLimiter,
+    Undescribed
+  }
+
   alias ArchLens.Generator.{Architecture, Contexts, Model, Scope}
 
   defp scope(overrides) do
@@ -59,6 +73,50 @@ defmodule ArchLens.Generator.ContextsTest do
 
       ingest = resolve_named(scope([]), :ingest)
       assert ingest.does_source == :moduledoc
+    end
+  end
+
+  describe "resolve/1 — flat single-file context modules (no directory of children)" do
+    test "a flat annotated module surfaces, does from its annotation" do
+      blog = resolve_named(scope(modules: flat_modules([Blog])), :blog)
+
+      assert blog.origin == :context_module
+      assert blog.provenance == :declared
+      assert blog.does == "publishes posts and manages drafts"
+      assert blog.does_source == :annotation
+      refute Map.has_key?(blog, :resources)
+    end
+
+    test "a flat annotated module surfaces, does from its @moduledoc" do
+      rate_limiter = resolve_named(scope(modules: flat_modules([RateLimiter])), :rate_limiter)
+
+      assert rate_limiter.origin == :context_module
+      assert rate_limiter.does == "Throttles inbound requests per workspace."
+      assert rate_limiter.does_source == :moduledoc
+    end
+
+    test "a flat annotated module honours a name: override" do
+      ctx = resolve_named(scope(modules: flat_modules([OAuth2Server])), :oauth2_server)
+
+      assert ctx.origin == :context_module
+      assert ctx.does == "issues OAuth 2.1 bearer tokens"
+    end
+
+    test "a flat annotated module with exclude: true stays out and passes the gate" do
+      scope = scope(modules: flat_modules([FlatExcluded]))
+      %{contexts: contexts} = Contexts.resolve(scope)
+
+      refute :flat_excluded in Enum.map(contexts, & &1.name)
+      assert Contexts.annotation_gate(scope) == :ok
+    end
+
+    test "a flat UNannotated single-file module stays invisible and is never gated" do
+      scope = scope(modules: flat_modules([Loose]))
+      %{contexts: contexts} = Contexts.resolve(scope)
+
+      refute :loose in Enum.map(contexts, & &1.name)
+      assert Contexts.annotation_gate(scope) == :ok
+      assert Contexts.style_gate(scope) == :ok
     end
   end
 
@@ -133,6 +191,17 @@ defmodule ArchLens.Generator.ContextsTest do
                {:error, {:missing_root_modules, ["ArchLens.CtxFixtures.Fixtures"]}}
 
       assert Contexts.style_gate(scope(modules: modules, ignore_namespaces: [:fixtures])) == :ok
+    end
+
+    test "ignore_namespaces matches the intuitive spelling of a mixed-case directory" do
+      modules = CtxFixtures.healthy_modules() ++ [E2E.Spec]
+
+      # The E2E folder has no root module → a style-gate offender without an ignore.
+      assert Contexts.style_gate(scope(modules: modules)) ==
+               {:error, {:missing_root_modules, ["ArchLens.CtxFixtures.E2E"]}}
+
+      # The intuitive `:e2e` (not the Macro.underscore-mangled `:e2_e`) excuses it.
+      assert Contexts.style_gate(scope(modules: modules, ignore_namespaces: [:e2e])) == :ok
     end
 
     test "skips cleanly when the app namespace or module list is unavailable" do
@@ -233,4 +302,8 @@ defmodule ArchLens.Generator.ContextsTest do
     %{contexts: contexts} = Contexts.resolve(scope)
     Enum.find(contexts, &(&1.name == name))
   end
+
+  # The healthy module set plus flat single-file modules (which have no children,
+  # so they never enter the module list via a folder namespace).
+  defp flat_modules(extra), do: CtxFixtures.healthy_modules() ++ extra
 end
