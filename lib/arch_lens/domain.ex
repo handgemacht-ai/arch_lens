@@ -61,6 +61,14 @@ defmodule ArchLens.Domain do
         type: :boolean,
         default: false,
         doc: "When `true`, omit this domain from the architecture model and the annotation gate."
+      ],
+      interface: [
+        type: {:list, :string},
+        default: [],
+        doc:
+          "Handler-module namespace prefixes this context serves (e.g. " <>
+            "`[\"MyAppWeb.AccountController\"]`), used to attribute entry points to it. " <>
+            "Empty leaves web entry points unattributed rather than guessing."
       ]
     ]
   }
@@ -102,6 +110,15 @@ defmodule ArchLens.Domain do
   @doc "Whether the domain has a resolvable description (a declared `does` or a `@moduledoc`)."
   @spec described?(module()) :: boolean()
   def described?(domain), do: elem(does(domain), 0) != nil
+
+  @doc """
+  The handler-module namespace prefixes this context serves, from a declared
+  `interface` (empty when none or not annotated). Used to attribute entry points.
+  """
+  @spec interface(module()) :: [String.t()]
+  def interface(domain) do
+    if annotated?(domain), do: get_opt(domain, :interface, []), else: []
+  end
 
   defp get_opt(domain, key, default) do
     Extension.get_opt(domain, [:architecture], key, default, true)

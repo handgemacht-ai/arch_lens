@@ -11,7 +11,7 @@ defmodule ArchLens.Context do
         use ArchLens.Context, does: "scores copy against the brand judges"
       end
 
-  All three options are optional:
+  All four options are optional:
 
     * `does:` — a one-line description; when omitted it falls back to the module's
       `@moduledoc` first paragraph (`ArchLens.Collect.ModuleDoc`).
@@ -19,6 +19,9 @@ defmodule ArchLens.Context do
       last segment (`derive_name/1`).
     * `exclude:` — `true` marks a genuine non-context root that should be left out
       of the architecture model and skipped by the annotation gate.
+    * `interface:` — a list of handler-module namespace prefixes this context
+      serves (e.g. `["MyAppWeb.JudgeController"]`), used to attribute entry points
+      to it; empty leaves them unattributed rather than guessing.
 
   `use ArchLens.Context` injects a `__arch_lens_context__/0` function the generator
   reads back through `ArchLens.Context.Info`. This mirrors how `ArchLens.Domain`
@@ -30,17 +33,19 @@ defmodule ArchLens.Context do
 
   @doc """
   Injects `__arch_lens_context__/0`, returning the `ArchLens.Context.Declaration`
-  for the module. `does`/`name`/`exclude` must be compile-time literals of the
-  right type, or compilation fails fast.
+  for the module. `does`/`name`/`exclude`/`interface` must be compile-time literals
+  of the right type, or compilation fails fast.
   """
   defmacro __using__(opts) do
     does = Keyword.get(opts, :does)
     name = Keyword.get(opts, :name)
     exclude = Keyword.get(opts, :exclude, false)
+    interface = Keyword.get(opts, :interface, [])
 
     validate!(:does, does, &(is_nil(&1) or is_binary(&1)))
     validate!(:name, name, &(is_nil(&1) or is_atom(&1)))
     validate!(:exclude, exclude, &is_boolean/1)
+    validate!(:interface, interface, &(is_list(&1) and Enum.all?(&1, fn v -> is_binary(v) end)))
 
     quote do
       @doc false
@@ -48,7 +53,8 @@ defmodule ArchLens.Context do
         %ArchLens.Context.Declaration{
           does: unquote(does),
           name: unquote(name),
-          exclude: unquote(exclude)
+          exclude: unquote(exclude),
+          interface: unquote(interface)
         }
       end
     end

@@ -2,11 +2,11 @@ defmodule ArchLens.System.Info do
   @moduledoc """
   Runtime introspection for the `ArchLens.System` DSL.
 
-  Reads the declared actors, external systems, and contexts back off a compiled
-  module that `use ArchLens.System`.
+  Reads the declared actors, external systems, contexts, flows, and town identity
+  back off a compiled module that `use ArchLens.System`.
   """
 
-  alias ArchLens.System.{Actor, Context, External}
+  alias ArchLens.System.{Actor, Context, External, Flow, Identity}
   alias Spark.Dsl.Extension
 
   @type system :: Spark.Dsl.t() | module()
@@ -23,6 +23,18 @@ defmodule ArchLens.System.Info do
   @spec contexts(system()) :: [Context.t()]
   def contexts(system), do: persisted(system, :arch_lens_contexts)
 
+  @doc "The declared flows, sorted by name (empty when none); steps keep declaration order."
+  @spec flows(system()) :: [Flow.t()]
+  def flows(system), do: persisted(system, :arch_lens_flows)
+
+  @doc "The declared town identity, or `nil` when none was declared."
+  @spec identity(system()) :: Identity.t() | nil
+  def identity(system) when is_atom(system) do
+    if spark_dsl?(system), do: read_identity(system), else: nil
+  end
+
+  def identity(system), do: read_identity(system)
+
   @doc """
   The top-level namespace directory names the style and annotation gates should
   skip, as declared by `ignore_namespaces` on the `architecture` section (empty
@@ -35,14 +47,32 @@ defmodule ArchLens.System.Info do
 
   def ignore_namespaces(system), do: read_ignore_namespaces(system)
 
-  @doc "All declared architecture entities grouped by kind."
+  @doc """
+  The detected external vendors/deps the externals completeness gate should not
+  require a declaration for, as declared by `ignore_externals` on the
+  `architecture` section (empty when none, or for a non-`ArchLens.System` module).
+  """
+  @spec ignore_externals(system()) :: [atom()]
+  def ignore_externals(system) when is_atom(system) do
+    if spark_dsl?(system), do: read_ignore_externals(system), else: []
+  end
+
+  def ignore_externals(system), do: read_ignore_externals(system)
+
+  @doc "All declared architecture entities grouped by kind (flows included)."
   @spec architecture(system()) :: %{
           actors: [Actor.t()],
           externals: [External.t()],
-          contexts: [Context.t()]
+          contexts: [Context.t()],
+          flows: [Flow.t()]
         }
   def architecture(system) do
-    %{actors: actors(system), externals: externals(system), contexts: contexts(system)}
+    %{
+      actors: actors(system),
+      externals: externals(system),
+      contexts: contexts(system),
+      flows: flows(system)
+    }
   end
 
   # `get_persisted` raises for a module that never went through the DSL. Reading a
@@ -56,6 +86,14 @@ defmodule ArchLens.System.Info do
 
   defp read_ignore_namespaces(system) do
     Extension.get_opt(system, [:architecture], :ignore_namespaces, [])
+  end
+
+  defp read_ignore_externals(system) do
+    Extension.get_opt(system, [:architecture], :ignore_externals, [])
+  end
+
+  defp read_identity(system) do
+    Extension.get_persisted(system, :arch_lens_identity, nil)
   end
 
   defp spark_dsl?(module) do

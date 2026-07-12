@@ -8,8 +8,10 @@ defmodule ArchLens.System.Validate do
     1. **Actor `uses:`.** Two things are enforced. First, *vocabulary*: every atom
        an actor `uses:` must name a known entry-point kind — the canonical list the
        generator emits, `ArchLens.Collect.EntryPoints.kinds/0`
-       (`:browser`, `:api`, `:webhook`, `:oauth`, `:mcp`, `:other`). An unknown atom
-       always fails, whether or not entry points were collected. Second, a
+       (`:browser`, `:api`, `:webhook`, `:oauth`, `:mcp`, `:other`), widened here
+       with `:cron` and `:channel` for the cron and channel entry-point surfaces.
+       An unknown atom always fails, whether or not entry points were collected.
+       Second, a
        *collected cross-check*: when entry points were collected, each known kind an
        actor uses must also appear among them. Only the cross-check is skipped, with
        a recorded warning, when no entry points were collected — the vocabulary
@@ -29,7 +31,7 @@ defmodule ArchLens.System.Validate do
   always produce the same ordered errors and warnings.
   """
 
-  @entry_point_uses ArchLens.Collect.EntryPoints.kinds()
+  @entry_point_uses Enum.uniq(ArchLens.Collect.EntryPoints.kinds() ++ [:cron, :channel])
 
   defstruct entry_point_kinds: MapSet.new(),
             entry_points_collected?: false,

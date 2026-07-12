@@ -60,6 +60,18 @@ defmodule ArchLens.Context.Info do
   @spec described?(module()) :: boolean()
   def described?(module), do: elem(does(module), 0) != nil
 
+  @doc """
+  The handler-module namespace prefixes this context serves, from an annotated
+  `interface:` (empty when none or not annotated). Used to attribute entry points.
+  """
+  @spec interface(module()) :: [String.t()]
+  def interface(module) do
+    case declaration(module) do
+      %Declaration{interface: interface} when is_list(interface) -> interface
+      _ -> []
+    end
+  end
+
   defp moduledoc_does(module) do
     case ModuleDoc.first_paragraph(module) do
       nil -> {nil, nil}
