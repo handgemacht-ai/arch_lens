@@ -10,11 +10,14 @@ defmodule ArchLens.System.Declared do
   `ArchLens.System.ValidationError` listing every failing check.
 
   When the caller does not supply `:known_modules`, they are derived
-  deterministically from the app and the already-collected scope so context module
-  prefixes can be checked without a database.
+  deterministically from the app's production (`lib/`) modules and the
+  already-collected scope so context module prefixes can be checked without a
+  database — and so validation does not pass under `:test` (where `test/support`
+  modules leak into the app) yet fail under `:dev`.
   """
 
   alias ArchLens.Edge
+  alias ArchLens.Generator.Scan
   alias ArchLens.System.{Info, Validate, ValidationError}
 
   @type scope_value :: %{
@@ -81,7 +84,7 @@ defmodule ArchLens.System.Declared do
   end
 
   defp derive_known_modules(inputs) do
-    app_modules = inputs |> Map.get(:app) |> app_key(:modules)
+    app_modules = inputs |> Map.get(:app) |> Scan.app_modules()
     scope_modules = scope_modules(inputs)
 
     (app_modules ++ scope_modules)
@@ -105,13 +108,4 @@ defmodule ArchLens.System.Declared do
   defp builder_module({module, _name}), do: module
   defp builder_module(module) when is_atom(module), do: module
   defp builder_module(_), do: nil
-
-  defp app_key(nil, _key), do: []
-
-  defp app_key(app, key) do
-    case Application.spec(app, key) do
-      nil -> []
-      value -> value
-    end
-  end
 end
