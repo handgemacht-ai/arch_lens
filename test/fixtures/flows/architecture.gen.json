@@ -1,0 +1,199 @@
+{
+  "app": {
+    "id": "arch_lens",
+    "source": "collected"
+  },
+  "context_dependencies": [
+    {
+      "from": "custom_name",
+      "id": "ctxdep:custom_name->judge",
+      "kind": "context_dependency",
+      "reference_count": 1,
+      "sample": {
+        "file": "lib/arch_lens/ctx_fixtures/renamed/worker.ex",
+        "from_module": "ArchLens.CtxFixtures.Renamed.Worker",
+        "line": 8,
+        "to_module": "ArchLens.CtxFixtures.Judge.Scorer"
+      },
+      "source": "collected",
+      "to": "judge"
+    },
+    {
+      "from": "ingest",
+      "id": "ctxdep:ingest->custom_name",
+      "kind": "context_dependency",
+      "reference_count": 1,
+      "sample": {
+        "file": "lib/arch_lens/ctx_fixtures/ingest/parser.ex",
+        "from_module": "ArchLens.CtxFixtures.Ingest.Parser",
+        "line": 20,
+        "to_module": "ArchLens.CtxFixtures.Renamed.Worker"
+      },
+      "source": "collected",
+      "to": "custom_name"
+    },
+    {
+      "from": "judge",
+      "id": "ctxdep:judge->ingest",
+      "kind": "context_dependency",
+      "reference_count": 1,
+      "sample": {
+        "file": "lib/arch_lens/ctx_fixtures/judge/scorer.ex",
+        "from_module": "ArchLens.CtxFixtures.Judge.Scorer",
+        "line": 10,
+        "to_module": "ArchLens.CtxFixtures.Ingest.Parser"
+      },
+      "source": "collected",
+      "to": "ingest"
+    }
+  ],
+  "data_inventory": [],
+  "decisions": [],
+  "declared_architecture": {
+    "actors": [],
+    "contexts": [
+      {
+        "does": "a context whose name is overridden",
+        "does_source": "annotation",
+        "id": "context:custom_name",
+        "module": "ArchLens.CtxFixtures.Renamed",
+        "name": "custom_name",
+        "origin": "context_module",
+        "provenance": "declared"
+      },
+      {
+        "does": "Ingests raw events from the edge and normalises them.",
+        "does_source": "moduledoc",
+        "id": "context:ingest",
+        "module": "ArchLens.CtxFixtures.Ingest",
+        "name": "ingest",
+        "origin": "context_module",
+        "provenance": "declared"
+      },
+      {
+        "does": "scores copy against the brand judges",
+        "does_source": "annotation",
+        "id": "context:judge",
+        "module": "ArchLens.CtxFixtures.Judge",
+        "name": "judge",
+        "origin": "context_module",
+        "provenance": "declared"
+      }
+    ],
+    "warnings": []
+  },
+  "edges": [
+    {
+      "builder": "ArchLens.CtxFixtures.Ingest.Parser",
+      "call_sites": [
+        {
+          "file": "lib/arch_lens/ctx_fixtures/ingest/parser.ex",
+          "line": 30
+        }
+      ],
+      "id": "edge:http_boundary:ArchLens.CtxFixtures.Ingest.Parser=>https://api.stripe.com/v1/charges",
+      "kind": "http_boundary",
+      "metadata": {},
+      "source": "collected",
+      "target": "https://api.stripe.com/v1/charges"
+    }
+  ],
+  "entry_points": [
+    {
+      "basis": "path segment /score",
+      "context": "judge",
+      "context_basis": "namespace containment (ArchLens.CtxFixtures.Judge)",
+      "handler": "ArchLens.CtxFixtures.Judge.Scorer",
+      "id": "route:POST:/score",
+      "kind": "api",
+      "method": "POST",
+      "path": "/score",
+      "pipelines": [],
+      "source": "collected"
+    }
+  ],
+  "external_systems": [
+    {
+      "does": "settles the charge",
+      "evidence": [],
+      "id": "external:stripe",
+      "label": "stripe → https://api.stripe.com (http)",
+      "name": "stripe",
+      "provenance": [
+        "declared"
+      ],
+      "source": "declared",
+      "target": "https://api.stripe.com",
+      "verification": "manual",
+      "via": "http"
+    }
+  ],
+  "flows": [
+    {
+      "does": "Demonstrates the unverified escape hatch.",
+      "id": "flow:assert_demo",
+      "name": "assert_demo",
+      "source": "declared",
+      "steps": [
+        {
+          "backed_by": null,
+          "kind": "context",
+          "ref": "context:ingest"
+        },
+        {
+          "backed_by": {
+            "type": "asserted"
+          },
+          "does": "asserted hop",
+          "kind": "context",
+          "ref": "context:judge"
+        }
+      ]
+    },
+    {
+      "does": "Scores incoming copy and settles the charge.",
+      "id": "flow:scoring_pipeline",
+      "name": "scoring_pipeline",
+      "source": "declared",
+      "steps": [
+        {
+          "backed_by": null,
+          "does": "receives the copy to score",
+          "kind": "entry_point",
+          "ref": "route:POST:/score"
+        },
+        {
+          "backed_by": {
+            "ref": "route:POST:/score",
+            "type": "entry_binding"
+          },
+          "does": "scores the copy against the brand judges",
+          "kind": "context",
+          "ref": "context:judge"
+        },
+        {
+          "backed_by": {
+            "ref": "ctxdep:judge->ingest",
+            "type": "dependency_edge"
+          },
+          "does": "normalises the scored payload",
+          "kind": "context",
+          "ref": "context:ingest"
+        },
+        {
+          "backed_by": {
+            "ref": "edge:http_boundary:ArchLens.CtxFixtures.Ingest.Parser=>https://api.stripe.com/v1/charges",
+            "type": "http_boundary"
+          },
+          "does": "settles the charge",
+          "kind": "external",
+          "ref": "external:stripe"
+        }
+      ]
+    }
+  ],
+  "oban_workers": [],
+  "resources": [],
+  "runtime_components": [],
+  "schema_version": 3
+}
