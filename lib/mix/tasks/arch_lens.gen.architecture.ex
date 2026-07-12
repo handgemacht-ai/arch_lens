@@ -45,17 +45,34 @@ defmodule Mix.Tasks.ArchLens.Gen.Architecture do
 
     path = Keyword.get(opts, :output, Architecture.artifact())
 
-    emit([app: app] ++ router_opts() ++ decisions_opts(), path, Keyword.get(opts, :check, false))
+    emit(
+      [app: app] ++ router_opts() ++ endpoint_opts() ++ decisions_opts(),
+      path,
+      Keyword.get(opts, :check, false)
+    )
   end
 
   # Entry-point collection is host-app-specific: a host app opts in by setting
   # `config :arch_lens, :router, MyAppWeb.Router`, and this task threads that
   # router into the scope so `ArchLens.Collect.EntryPoints` can read its routes.
-  # Absent config yields no router, so the entry-points section stays empty.
+  # Absent config yields no router, so the entry-points section stays empty. Cron
+  # entry points need no config beyond `app:` (already threaded) — they are read
+  # from the loaded Oban crontab.
   defp router_opts do
     case Application.get_env(:arch_lens, :router) do
       nil -> []
       router -> [router: router]
+    end
+  end
+
+  # Channel entry-point collection opts in the same way as the router: a host app
+  # sets `config :arch_lens, :endpoint, MyAppWeb.Endpoint`, and this task threads it
+  # so `ArchLens.Collect.Channels` can reflect the endpoint's socket mounts. Absent
+  # config yields no endpoint, so no channel entry points are collected.
+  defp endpoint_opts do
+    case Application.get_env(:arch_lens, :endpoint) do
+      nil -> []
+      endpoint -> [endpoint: endpoint]
     end
   end
 

@@ -28,10 +28,14 @@ defmodule ArchLens.Generator.Scope do
   context (via wrapper mix tasks), so `resolve/1` only reads whatever the caller
   passes for them — it does not scan for them here.
 
-  `entry_points` is a wired seam: pass `:entry_points` directly, or pass `:router`
-  (a host Phoenix router module) and `resolve/1` collects the entry points from it
-  via `ArchLens.Collect.EntryPoints.collect/1`. This mirrors how `:edges` defaults
-  to the recorded registry — an explicit value always wins.
+  `entry_points` is a wired seam: pass `:entry_points` directly, or let `resolve/1`
+  build the default inventory from three collector seams at once — the Phoenix
+  router (`:router`), the Oban cron crontab (`:app`/`:oban_config`), and Phoenix
+  channels (`:endpoint`/`:sockets`). Cron and channel entries are folded in
+  automatically so an adopting app never concatenates them by hand; each seam is a
+  graceful no-op when its input is absent (no router, no loaded crontab, no
+  endpoint). This mirrors how `:edges` defaults to the recorded registry — an
+  explicit `:entry_points` value always wins over all three.
 
   `declared_architecture` is the other wired seam: pass `:declared_architecture`
   directly, or pass `:system` (a module that `use ArchLens.System`) and `resolve/1`
@@ -159,7 +163,27 @@ defmodule ArchLens.Generator.Scope do
     }
   end
 
+  # The default entry-point inventory: the union of the three collector seams —
+  # Phoenix router routes, the Oban cron crontab, and Phoenix channel mounts — so a
+  # host app that opts in via config gets cron and channel entry points folded in
+  # with no per-app concatenation. Each seam returns `[]` when its input is absent,
+  # so a web-less or cron-less app simply contributes nothing from that seam. Ids are
+  # collector-namespaced (`route:` / `cron:` / `channel:`), so `uniq_by/2` only
+  # collapses a genuine duplicate within a seam and can never conflate two kinds; the
+  # three already-sorted blocks concatenate deterministically and the renderers apply
+  # the canonical kind order. Reads the same loaded Oban config as the `:cron` seam,
+  # so the two can never disagree.
   defp collect_entry_points(opts) do
+    [
+      router_entry_points(opts),
+      Collect.Cron.entry_points(opts),
+      Collect.Channels.collect(opts)
+    ]
+    |> Enum.concat()
+    |> Enum.uniq_by(& &1.id)
+  end
+
+  defp router_entry_points(opts) do
     case Keyword.get(opts, :router) do
       nil -> []
       router -> Collect.EntryPoints.collect(router)
