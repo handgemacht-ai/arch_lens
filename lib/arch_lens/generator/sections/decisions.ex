@@ -3,10 +3,17 @@ defmodule ArchLens.Generator.Sections.Decisions do
   Renders the *decisions* section: the architecture-decision records indexed by
   `ArchLens.Collect.Decisions`.
 
-  This is the wave-2 skeleton stub: it renders the empty state and a generic
-  bullet, so the empty-v3 baseline renders. The wave-3 decisions slice fleshes
-  `render/1` into `- **ADR-NNNN** <title> — _status_ (date) \\`path\\`` bullets and
-  `to_json/1` sorted by number.
+  `render/1` yields the `## Decisions` index — one bullet per ADR, sorted by
+  number:
+
+      - **ADR-0001** REST API consolidates on AshJsonApi — _accepted_ (2026-06-15) `docs/decisions/0001-rest-api-ashjsonapi.md`
+
+  The path is a repo-relative **code span**, not a Markdown link: it is
+  deliberately consistent with how call-site paths render elsewhere in the
+  artifact, and it avoids a broken-link footgun (the artifact's own location
+  varies with `--output`, and `Document.render/1` has no output-path context). The
+  JSON `path` field lets rich viewers link. `render([])` yields `[]`, so an app
+  with zero ADRs renders no section.
   """
 
   @behaviour ArchLens.Generator.Section
@@ -20,8 +27,22 @@ defmodule ArchLens.Generator.Sections.Decisions do
 
   @impl true
   def render([]), do: []
-  def render(entries), do: [@heading, "" | Enum.map(entries, &Section.bullet/1)]
+
+  def render(entries) do
+    bullets = entries |> Enum.sort_by(&number/1) |> Enum.map(&bullet/1)
+    [@heading, "" | bullets]
+  end
 
   @impl true
-  def to_json(entries), do: Enum.map(entries, &Section.jsonable/1)
+  def to_json(entries) do
+    entries
+    |> Enum.map(&Section.jsonable/1)
+    |> Enum.sort_by(&number/1)
+  end
+
+  defp bullet(entry) do
+    "- **ADR-#{number(entry)}** #{entry["title"]} — _#{entry["status"]}_ (#{entry["date"]}) `#{entry["path"]}`"
+  end
+
+  defp number(entry), do: entry["number"] || ""
 end
