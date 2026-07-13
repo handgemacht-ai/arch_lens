@@ -26,7 +26,7 @@
       "counts": {
         "actors": 3,
         "contexts": 13,
-        "entry_points": 59,
+        "entry_points": 62,
         "external_systems": 3,
         "oban_workers": 5,
         "resources": 20
