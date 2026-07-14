@@ -14,6 +14,7 @@ defmodule ArchLens.Generator.Document do
 
   alias ArchLens.Generator.Sections.{
     App,
+    Boundaries,
     ContextDependencies,
     DataFlows,
     DataInventory,
@@ -172,6 +173,7 @@ defmodule ArchLens.Generator.Document do
       DataFlows.render(model[:flows]),
       DataInventory.render(model[:data_inventory]),
       DeclaredArchitecture.render(model[:declared_architecture]),
+      Boundaries.render(model[:boundaries]),
       Decisions.render(model[:decisions]),
       App.render(model[:app])
     ]

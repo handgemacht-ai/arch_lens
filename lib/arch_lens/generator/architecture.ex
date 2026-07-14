@@ -31,6 +31,10 @@ defmodule ArchLens.Generator.Architecture do
     * **decisions** — an ADR under the decisions directory has malformed
       front-matter (`{:error, {:invalid_decisions, [...]}}`); see
       `ArchLens.Collect.Decisions`.
+    * **boundaries** — a boundary classification names a module that is not a
+      boundary or not one of its actual exports, a sanctioned export lacks a
+      reason, or a module is classified both ways
+      (`{:error, {:invalid_boundaries, [...]}}`); see `ArchLens.Collect.Boundaries`.
     * **flows** — a declared data flow references a missing element or an unbacked
       adjacency (`{:error, {:invalid_flows, [...]}}`); see
       `ArchLens.Generator.Flows`.
@@ -60,6 +64,7 @@ defmodule ArchLens.Generator.Architecture do
           | {:undescribed_contexts, [String.t()]}
           | {:undeclared_externals, [String.t()]}
           | {:invalid_decisions, [{String.t(), String.t()}]}
+          | {:invalid_boundaries, [ArchLens.Collect.Boundaries.error()]}
           | {:invalid_flows, [term()]}
 
   @type artifacts :: %{markdown: String.t(), json: String.t()}
@@ -93,6 +98,7 @@ defmodule ArchLens.Generator.Architecture do
          :ok <- Contexts.annotation_gate(scope),
          :ok <- externals_gate(scope),
          :ok <- decisions_gate(scope),
+         :ok <- boundaries_gate(scope),
          :ok <- Flows.gate(scope) do
       model = Model.to_map(scope)
       {:ok, %{markdown: Document.render(model), json: Model.encode(model)}}
@@ -174,6 +180,16 @@ defmodule ArchLens.Generator.Architecture do
       "(`title`, `status`, `date`)."
   end
 
+  def format_error({:invalid_boundaries, offenders}) do
+    lines = Enum.map_join(offenders, "; ", &boundary_error_line/1)
+
+    "invalid boundary classification(s): #{lines}. " <>
+      "Every `config :arch_lens, :boundary_classifications` entry must name a real " <>
+      "boundary and one of its actual exports, and every sanctioned export needs a " <>
+      "one-line reason. Fix the classification, or disable ingestion with " <>
+      "`config :arch_lens, :boundaries, false`."
+  end
+
   def format_error({:invalid_flows, offenders}) do
     "invalid data flow(s): #{Enum.join(offenders, ", ")}. " <>
       "Every flow step must resolve to a real entry point, context, or external, and " <>
@@ -209,4 +225,24 @@ defmodule ArchLens.Generator.Architecture do
   # indexable record (parse errors collected by `ArchLens.Collect.Decisions`).
   defp decisions_gate(%Scope{decision_errors: []}), do: :ok
   defp decisions_gate(%Scope{decision_errors: errors}), do: {:error, {:invalid_decisions, errors}}
+
+  # The boundaries validity gate: every declared boundary classification names a
+  # real boundary and a real export, and every sanctioned export carries a reason
+  # (errors collected by `ArchLens.Collect.Boundaries`).
+  defp boundaries_gate(%Scope{boundary_errors: []}), do: :ok
+
+  defp boundaries_gate(%Scope{boundary_errors: errors}),
+    do: {:error, {:invalid_boundaries, errors}}
+
+  defp boundary_error_line({:unknown_boundary, boundary}),
+    do: "#{boundary} is classified but is not a boundary"
+
+  defp boundary_error_line({:unknown_export, boundary, export}),
+    do: "#{boundary} classifies #{export}, which it does not export"
+
+  defp boundary_error_line({:missing_reason, boundary, export}),
+    do: "#{boundary} sanctions #{export} without a reason"
+
+  defp boundary_error_line({:conflicting, boundary, export}),
+    do: "#{boundary} classifies #{export} as both sanctioned and grandfathered"
 end

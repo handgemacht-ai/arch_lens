@@ -53,6 +53,12 @@ defmodule ArchLens.MixProject do
       # absent (the collector guards on Code.ensure_loaded?/1 and calls through
       # apply/3). Tests build a minimal fixture router, which needs Phoenix present.
       {:phoenix, "~> 1.7", only: :test, runtime: false},
+      # Boundary is test-only: the boundary-ingestion collector reads a host app's
+      # declared boundary specs through the `boundary` lib's model, but arch_lens
+      # must compile and run with boundary absent (the collector guards on
+      # Code.ensure_loaded?/1). Tests define fixture boundaries, which need it
+      # present.
+      {:boundary, "~> 0.10", only: :test, runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false}
     ]
   end

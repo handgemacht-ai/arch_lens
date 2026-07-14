@@ -40,6 +40,7 @@ defmodule ArchLens.Generator.Model do
   }
 
   alias ArchLens.Generator.Sections.{
+    Boundaries,
     Decisions,
     DeclaredArchitecture,
     EntryPoints,
@@ -78,7 +79,16 @@ defmodule ArchLens.Generator.Model do
       decisions: Decisions.to_json(scope.decisions),
       declared_architecture: DeclaredArchitecture.to_json(declared_architecture(scope, contexts))
     }
+    |> maybe_put(:boundaries, boundaries_json(scope))
   end
+
+  # The boundaries section is conditionally present: absent (the key is dropped)
+  # when the app does not use the hex `boundary` library, so an already-committed
+  # artifact stays byte-identical until the app adopts boundaries. This is additive
+  # and keeps `schema_version` at 3 — the same rule the entry-point and decisions
+  # seams follow — so cross-version diffs against pre-boundaries artifacts still work.
+  defp boundaries_json(%Scope{boundaries: []}), do: nil
+  defp boundaries_json(%Scope{boundaries: boundaries}), do: Boundaries.to_json(boundaries)
 
   # The declared-architecture value the section renders: the central actors and
   # validation warnings (unchanged), but with contexts resolved from in-place
