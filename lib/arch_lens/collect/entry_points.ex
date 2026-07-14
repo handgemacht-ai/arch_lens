@@ -24,10 +24,11 @@ defmodule ArchLens.Collect.EntryPoints do
   ## Classification
 
   A *route* is classified into one of `#{inspect(~w(browser api webhook oauth mcp other)a)}`
-  by a fixed-precedence heuristic (most specific first); the `:cron` and `:channel`
-  kinds are contributed by the sibling `ArchLens.Collect.Cron` /
-  `ArchLens.Collect.Channels` collectors, not by route classification, so
-  `kinds/0` (the canonical render/sort order) lists them after `:mcp`:
+  by a fixed-precedence heuristic (most specific first); the `:cron`, `:channel`,
+  and `:task` kinds are contributed by the sibling `ArchLens.Collect.Cron` /
+  `ArchLens.Collect.Channels` / `ArchLens.Collect.Tasks` collectors, not by route
+  classification, so `kinds/0` (the canonical render/sort order) lists them after
+  `:mcp`:
 
     * `:mcp` — an `/mcp` path segment, or a forward targeting an MCP/Hermes plug.
     * `:oauth` — an `oauth` pipeline/path segment, or an OAuth-named plug.
@@ -58,7 +59,7 @@ defmodule ArchLens.Collect.EntryPoints do
 
   alias ArchLens.Edge
 
-  @kinds ~w(browser api webhook oauth mcp cron channel other)a
+  @kinds ~w(browser api webhook oauth mcp cron channel task other)a
 
   @doc "The entry-point kinds, in the canonical render/sort order."
   @spec kinds() :: [atom()]
