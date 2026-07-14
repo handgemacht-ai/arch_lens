@@ -41,6 +41,39 @@ defmodule ArchLens.Generator.ScanTest do
     end
   end
 
+  describe "mix_tasks/1 — lib-only discovery of the app's Mix tasks" do
+    test "finds :arch_lens's own lib/ tasks and excludes test/support task fixtures" do
+      tasks = Scan.mix_tasks(:arch_lens)
+
+      # arch_lens's real tasks live under lib/mix/tasks/, so they are in scope.
+      assert Mix.Tasks.ArchLens.Gen.Architecture in tasks
+      assert Mix.Tasks.ArchLens.Diff in tasks
+
+      # A Mix task compiled from test/support is not production code — honestly out.
+      refute Mix.Tasks.ArchLensFixture.WithShortdoc in tasks
+      refute Mix.Tasks.ArchLensFixture.NoShortdoc in tasks
+    end
+
+    test "mix_task_module? accepts a real Mix.Tasks.* task and rejects a plain module" do
+      assert Scan.mix_task_module?(Mix.Tasks.ArchLens.Gen.Architecture)
+      refute Scan.mix_task_module?(ArchLens.Generator.Scan)
+    end
+
+    test "mix_tasks_from_modules filters, de-duplicates, and sorts a module list" do
+      modules = [
+        Mix.Tasks.ArchLensFixture.WithShortdoc,
+        ArchLens.Generator.Scan,
+        Mix.Tasks.ArchLensFixture.WithShortdoc,
+        Mix.Tasks.ArchLensFixture.NoShortdoc
+      ]
+
+      assert Scan.mix_tasks_from_modules(modules) == [
+               Mix.Tasks.ArchLensFixture.NoShortdoc,
+               Mix.Tasks.ArchLensFixture.WithShortdoc
+             ]
+    end
+  end
+
   describe "a test-support context-shaped module never surfaces (the ParityCorpus shape)" do
     test "present in the raw scan, it is filtered out of the lib-only scan and its contexts" do
       raw = raw_app_modules(:arch_lens)

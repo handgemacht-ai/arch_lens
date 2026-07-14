@@ -29,13 +29,14 @@ defmodule ArchLens.Generator.Scope do
   passes for them — it does not scan for them here.
 
   `entry_points` is a wired seam: pass `:entry_points` directly, or let `resolve/1`
-  build the default inventory from three collector seams at once — the Phoenix
-  router (`:router`), the Oban cron crontab (`:app`/`:oban_config`), and Phoenix
-  channels (`:endpoint`/`:sockets`). Cron and channel entries are folded in
-  automatically so an adopting app never concatenates them by hand; each seam is a
-  graceful no-op when its input is absent (no router, no loaded crontab, no
-  endpoint). This mirrors how `:edges` defaults to the recorded registry — an
-  explicit `:entry_points` value always wins over all three.
+  build the default inventory from four collector seams at once — the Phoenix
+  router (`:router`), the Oban cron crontab (`:app`/`:oban_config`), Phoenix
+  channels (`:endpoint`/`:sockets`), and the app's Mix tasks (`:app`, the CLI
+  surface). Cron, channel, and task entries are folded in automatically so an
+  adopting app never concatenates them by hand; each seam is a graceful no-op when
+  its input is absent (no router, no loaded crontab, no endpoint, no `:app`). This
+  mirrors how `:edges` defaults to the recorded registry — an explicit
+  `:entry_points` value always wins over all four.
 
   `declared_architecture` is the other wired seam: pass `:declared_architecture`
   directly, or pass `:system` (a module that `use ArchLens.System`) and `resolve/1`
@@ -163,21 +164,23 @@ defmodule ArchLens.Generator.Scope do
     }
   end
 
-  # The default entry-point inventory: the union of the three collector seams —
-  # Phoenix router routes, the Oban cron crontab, and Phoenix channel mounts — so a
-  # host app that opts in via config gets cron and channel entry points folded in
-  # with no per-app concatenation. Each seam returns `[]` when its input is absent,
-  # so a web-less or cron-less app simply contributes nothing from that seam. Ids are
-  # collector-namespaced (`route:` / `cron:` / `channel:`), so `uniq_by/2` only
-  # collapses a genuine duplicate within a seam and can never conflate two kinds; the
-  # three already-sorted blocks concatenate deterministically and the renderers apply
-  # the canonical kind order. Reads the same loaded Oban config as the `:cron` seam,
-  # so the two can never disagree.
+  # The default entry-point inventory: the union of the four collector seams —
+  # Phoenix router routes, the Oban cron crontab, Phoenix channel mounts, and the
+  # app's Mix tasks — so a host app that opts in via config gets cron, channel, and
+  # task entry points folded in with no per-app concatenation. Each seam returns
+  # `[]` when its input is absent, so a web-less or cron-less or task-less app simply
+  # contributes nothing from that seam. Ids are collector-namespaced (`route:` /
+  # `cron:` / `channel:` / `task:`), so `uniq_by/2` only collapses a genuine
+  # duplicate within a seam and can never conflate two kinds; the four already-sorted
+  # blocks concatenate deterministically and the renderers apply the canonical kind
+  # order. Reads the same loaded Oban config as the `:cron` seam, so the two can
+  # never disagree.
   defp collect_entry_points(opts) do
     [
       router_entry_points(opts),
       Collect.Cron.entry_points(opts),
-      Collect.Channels.collect(opts)
+      Collect.Channels.collect(opts),
+      Collect.Tasks.collect(opts)
     ]
     |> Enum.concat()
     |> Enum.uniq_by(& &1.id)

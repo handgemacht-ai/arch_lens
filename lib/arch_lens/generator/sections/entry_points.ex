@@ -1,13 +1,15 @@
 defmodule ArchLens.Generator.Sections.EntryPoints do
   @moduledoc """
-  Renders the *entry points* seam (HTTP routes / mounted endpoints).
+  Renders the *entry points* seam — the app's inbound surface: HTTP routes, Oban
+  cron schedules, Phoenix channels, and Mix tasks (the CLI surface).
 
-  `ArchLens.Collect.EntryPoints` populates `Scope.entry_points` from a host
-  Phoenix router; this module owns how those elements serialise to the JSON model
-  (`to_json/1`) and render to Markdown (`render/1`). Both are deterministic:
-  elements are sorted by `{kind, method, path}` and the Markdown groups them by
-  kind (in a fixed order) with per-group counts, so unchanged routes reproduce
-  byte-identical output.
+  The sibling `ArchLens.Collect.*` collectors populate `Scope.entry_points` (routes
+  from a host Phoenix router, cron from the Oban crontab, channels from socket
+  mounts, tasks from the app's `Mix.Tasks.*` modules); this module owns how those
+  elements serialise to the JSON model (`to_json/1`) and render to Markdown
+  (`render/1`). Both are deterministic: elements are sorted by `{kind, method, path}`
+  and the Markdown groups them by kind (in a fixed order) with per-group counts, so
+  an unchanged inbound surface reproduces byte-identical output.
 
   Provenance (`source: "collected"`) is stamped on each element by the collector,
   not here — so a hand-supplied entry (e.g. a bare `%{label: ...}`) passes through
@@ -20,7 +22,7 @@ defmodule ArchLens.Generator.Sections.EntryPoints do
 
   @heading "## Entry points"
 
-  @kind_order ~w(browser api webhook oauth mcp cron channel other)
+  @kind_order ~w(browser api webhook oauth mcp cron channel task other)
   @kind_titles %{
     "browser" => "Browser",
     "api" => "API",
@@ -29,6 +31,7 @@ defmodule ArchLens.Generator.Sections.EntryPoints do
     "mcp" => "MCP",
     "cron" => "Cron",
     "channel" => "Channel",
+    "task" => "Task",
     "other" => "Other"
   }
 
@@ -73,8 +76,9 @@ defmodule ArchLens.Generator.Sections.EntryPoints do
   end
 
   # The leading code-span of a bullet: a route's method+path, a cron entry's
-  # verbatim schedule, or a channel entry's topic pattern. `nil` for an entry with
-  # none of these (a hand-supplied passthrough), which falls back to Section.bullet.
+  # verbatim schedule, a channel entry's topic pattern, or a task entry's `mix …`
+  # command. `nil` for an entry with none of these (a hand-supplied passthrough),
+  # which falls back to Section.bullet.
   defp lead(entry) do
     cond do
       entry["kind"] == "cron" and is_binary(entry["schedule"]) ->
@@ -82,6 +86,9 @@ defmodule ArchLens.Generator.Sections.EntryPoints do
 
       entry["kind"] == "channel" and is_binary(entry["topic"]) ->
         "`#{entry["topic"]}`"
+
+      entry["kind"] == "task" and is_binary(entry["command"]) ->
+        "`#{entry["command"]}`"
 
       is_binary(entry["method"]) and is_binary(entry["path"]) ->
         "`#{entry["method"]} #{entry["path"]}`"
@@ -110,11 +117,14 @@ defmodule ArchLens.Generator.Sections.EntryPoints do
     end
   end
 
-  # The attributed context and the classification basis, italicised:
-  # ` — _<context> · <basis>_`. Context is the attributed bounded context, or
-  # "Unattributed" when null; the basis is dropped when the element carries none.
+  # The attributed context and a detail clause, italicised:
+  # ` — _<context> · <detail>_`. Context is the attributed bounded context, or
+  # "Unattributed" when null. The detail prefers a verbatim `description` (a task's
+  # `@shortdoc`) when present, else the classification `basis`; an element carrying
+  # neither shows just the context. Elements without a `description` (routes, cron,
+  # channels) render exactly as before.
   defp attribution_suffix(entry) do
-    parts = [context_label(entry) | basis_part(entry["basis"])]
+    parts = [context_label(entry) | detail_part(entry)]
     " — _#{Enum.join(parts, " · ")}_"
   end
 
@@ -122,6 +132,13 @@ defmodule ArchLens.Generator.Sections.EntryPoints do
     case entry["context"] do
       name when is_binary(name) -> name
       _ -> "Unattributed"
+    end
+  end
+
+  defp detail_part(entry) do
+    case entry["description"] do
+      description when is_binary(description) and description != "" -> [description]
+      _ -> basis_part(entry["basis"])
     end
   end
 

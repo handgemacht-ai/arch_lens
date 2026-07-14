@@ -100,6 +100,44 @@ defmodule ArchLens.Generator.Scan do
   end
 
   @doc """
+  Every Mix task in `app`'s production code (`lib/`), sorted by module name.
+
+  A Mix task is a `Mix.Tasks.*` module that `use`s `Mix.Task`. Discovery runs
+  through the same lib-only scan as resources and Oban workers, so a task compiled
+  only from `test/support` stays honestly out of scope. `nil` yields an empty list.
+  """
+  @spec mix_tasks(atom() | nil) :: [module()]
+  def mix_tasks(nil), do: []
+
+  def mix_tasks(app) when is_atom(app) do
+    app |> app_modules() |> mix_tasks_from_modules()
+  end
+
+  @doc "Filters an explicit module list down to the Mix task modules it contains."
+  @spec mix_tasks_from_modules([module()]) :: [module()]
+  def mix_tasks_from_modules(modules) do
+    modules
+    |> Enum.filter(&mix_task_module?/1)
+    |> Enum.uniq()
+    |> Enum.sort_by(&Atom.to_string/1)
+  end
+
+  @doc """
+  Whether `module` is an invokable Mix task: a `Mix.Tasks.*` module that carries
+  the `Mix.Task` behaviour and exports `run/1`. The `Mix.Tasks.` prefix is required
+  so `Mix.Task.task_name/1` derives a correct task name from the module.
+  """
+  @spec mix_task_module?(module()) :: boolean()
+  def mix_task_module?(module) when is_atom(module) do
+    String.starts_with?(Atom.to_string(module), "Elixir.Mix.Tasks.") and
+      Code.ensure_loaded?(module) and
+      function_exported?(module, :run, 1) and
+      behaviour?(module, Mix.Task)
+  end
+
+  def mix_task_module?(_module), do: false
+
+  @doc """
   Every *production* module compiled into `app` — the modules whose compiled source
   lives under the project's `lib/` directory — read from the app's `.app` metadata
   (never a database) and filtered to `lib/`. See the moduledoc for why the scan is

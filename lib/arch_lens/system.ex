@@ -29,7 +29,8 @@ defmodule ArchLens.System do
   at generation time (`ArchLens.System.Declared`):
 
     * an actor's `uses:` must name known entry-point kinds — `:browser`, `:api`,
-      `:webhook`, `:oauth`, `:mcp`, `:other` (`ArchLens.Collect.EntryPoints.kinds/0`);
+      `:webhook`, `:oauth`, `:mcp`, `:cron`, `:channel`, `:task`, `:other`
+      (`ArchLens.Collect.EntryPoints.kinds/0`);
       an unknown atom always fails, and when entry points were collected each kind
       must also have been collected (this collected cross-check is skipped, with a
       warning, when nothing was collected),
