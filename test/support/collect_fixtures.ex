@@ -94,10 +94,9 @@ defmodule ArchLens.CollectFixtures.Router do
 
   scope "/", ArchLens.CollectFixtures do
     pipe_through(:browser)
-    # Phoenix 1.8 does not expose pipe_through via routes/1, so the browser
-    # classification rides on the route's declared accepts (html), recorded in
-    # metadata, rather than a silent controller default.
-    get("/dashboard", PageController, :index, metadata: %{accepts: ["html"]})
+    # Phoenix 1.8 omits pipe_through from routes/1; the collector recovers it via
+    # route_info/4, so the browser classification rides on the :browser pipeline.
+    get("/dashboard", PageController, :index)
   end
 
   scope "/api", ArchLens.CollectFixtures do

@@ -22,13 +22,15 @@ defmodule ArchLens.Generator.Sections.EntryPoints do
 
   @heading "## Entry points"
 
-  @kind_order ~w(browser api webhook oauth mcp cron channel task other)
+  @kind_order ~w(browser api webhook oauth mcp health dev cron channel task other)
   @kind_titles %{
     "browser" => "Browser",
     "api" => "API",
     "webhook" => "Webhook",
     "oauth" => "OAuth",
     "mcp" => "MCP",
+    "health" => "Health",
+    "dev" => "Dev",
     "cron" => "Cron",
     "channel" => "Channel",
     "task" => "Task",
