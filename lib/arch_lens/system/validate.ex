@@ -8,8 +8,9 @@ defmodule ArchLens.System.Validate do
     1. **Actor `uses:`.** Two things are enforced. First, *vocabulary*: every atom
        an actor `uses:` must name a known entry-point kind — the canonical list the
        generator emits, `ArchLens.Collect.EntryPoints.kinds/0`
-       (`:browser`, `:api`, `:webhook`, `:oauth`, `:mcp`, `:other`), widened here
-       with `:cron` and `:channel` for the cron and channel entry-point surfaces.
+       (`:browser`, `:api`, `:webhook`, `:oauth`, `:mcp`, `:health`, `:dev`,
+       `:other`), widened here with `:cron` and `:channel` for the cron and channel
+       entry-point surfaces.
        An unknown atom always fails, whether or not entry points were collected.
        Second, a
        *collected cross-check*: when entry points were collected, each known kind an

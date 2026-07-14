@@ -23,43 +23,57 @@ defmodule ArchLens.Collect.EntryPoints do
 
   ## Classification
 
-  A *route* is classified into one of `#{inspect(~w(browser api webhook oauth mcp other)a)}`
-  by a fixed-precedence heuristic (most specific first); the `:cron`, `:channel`,
-  and `:task` kinds are contributed by the sibling `ArchLens.Collect.Cron` /
+  A *route* is classified into one of
+  `#{inspect(~w(browser api webhook oauth mcp health dev other)a)}` by a
+  fixed-precedence heuristic (most specific first); the `:cron`, `:channel`, and
+  `:task` kinds are contributed by the sibling `ArchLens.Collect.Cron` /
   `ArchLens.Collect.Channels` / `ArchLens.Collect.Tasks` collectors, not by route
   classification, so `kinds/0` (the canonical render/sort order) lists them after
-  `:mcp`:
+  the route kinds:
 
     * `:mcp` — an `/mcp` path segment, or a forward targeting an MCP/Hermes plug.
     * `:oauth` — an `oauth` pipeline/path segment, or an OAuth-named plug.
     * `:webhook` — a `webhook(s)` pipeline/path segment, or a Webhook-named plug.
-    * `:api` — an `api`/`bearer`/`token` pipeline, an `/api` path segment, an
-      API-named plug (JSON + bearer-ish), or a route whose declared `accepts` are
-      JSON-only.
-    * `:browser` — a LiveView route, a `browser`/`html` pipeline, or a route whose
-      declared `accepts` include `html`.
-    * `:other` — matched none of the above, including a controller route with **no
-      determinable evidence** (no pipeline, path, plug, or `accepts` signal). Such a
-      route is `:other` with basis `"unclassified"` — never a silent `:browser`
-      default, which would mislabel e.g. a JSON API sitting behind a custom auth
-      pipeline whose plug/path carry no `api` token.
+    * `:api` — an `api`/`bearer`/`token`/`json`/`graphql` pipeline, an `/api` path
+      segment, an API-named plug, or a route whose declared `accepts` are JSON-only.
+    * `:dev` — a `/dev` path segment, or a dev-tooling plug (LiveDashboard, mailbox
+      preview, live/code reloader). Dev tooling rides the `:browser` pipeline but is
+      never part of the product surface, so it is refined out ahead of `:browser`.
+    * `:health` — a `/health`(z) path segment, or a Health-named plug: the
+      monitoring surface, distinct from the API and the browser app. A health route
+      that rides the `api` pipeline stays `:api` (this fires on the path/plug signal
+      only), so `:health` stays reserved for the bare liveness/readiness endpoints.
+    * `:browser` — a LiveView route, a browser-family pipeline
+      (`browser`/`html`/`web`/`public`/`guest`/`live`), a route whose declared
+      `accepts` include `html`, or one serving a web document by extension
+      (`.xml`/`.txt`/`.rss`/`.atom`/…).
+    * `:other` — matched none of the above: a controller route with **no
+      determinable evidence** (no pipeline, path, plug, or `accepts` signal), basis
+      `"unclassified"`. This stays a genuine last resort rather than a silent
+      `:browser` default, which would mislabel e.g. a JSON API sitting behind a
+      custom auth pipeline whose plug/path carry no `api` token — but with pipeline
+      recovery (below) it is now rare.
 
   Precedence is deliberate: a `/api/mcp` route is an MCP entry point, not a plain
-  API one.
+  API one; a `/dev/dashboard` LiveView is dev tooling, not a browser surface.
 
   Within each kind, signals are tried pipeline → path → plug-name, and the `basis`
-  names the one that fired. `Phoenix.Router.routes/1` on Phoenix 1.8+ no longer
-  exposes `pipe_through`, so pipeline signals only fire for callers that pass full
-  route structs (older Phoenix, or hand-built maps); real 1.8 routers classify on
-  the path, plug, and `accepts` signals. A route's accepted content types are read
-  from a top-level `:accepts` field or `metadata[:accepts]` (Phoenix stores route
-  `metadata`), when present. `pipelines` is still recorded (empty when the router
-  does not expose them) so the element schema is stable.
+  names the one that fired. `Phoenix.Router.routes/1` on Phoenix 1.8+ returns
+  reduced route maps that omit `pipe_through`, so `collect/1` recovers each route's
+  scope pipelines via `Phoenix.Router.route_info/4` (probing the route's own verb
+  against a placeholder-filled path) and threads them onto the route before
+  classifying — this is what lets the pipeline signal fire on a real 1.8 router and
+  is the single biggest driver of correct classification. A caller that already
+  supplies `pipe_through` (older Phoenix, or hand-built maps) keeps it. A route's
+  accepted content types are read from a top-level `:accepts` field or
+  `metadata[:accepts]` (Phoenix stores route `metadata`), when present. `pipelines`
+  is always recorded (empty when neither supplied nor recoverable) so the element
+  schema is stable.
   """
 
   alias ArchLens.Edge
 
-  @kinds ~w(browser api webhook oauth mcp cron channel task other)a
+  @kinds ~w(browser api webhook oauth mcp health dev cron channel task other)a
 
   @doc "The entry-point kinds, in the canonical render/sort order."
   @spec kinds() :: [atom()]
@@ -76,11 +90,64 @@ defmodule ArchLens.Collect.EntryPoints do
     if Code.ensure_loaded?(Phoenix.Router) and function_exported?(Phoenix.Router, :routes, 1) do
       Phoenix.Router
       |> apply(:routes, [router])
+      |> Enum.map(&recover_pipelines(router, &1))
       |> from_routes()
     else
       []
     end
   end
+
+  # `Phoenix.Router.routes/1` on 1.8+ returns reduced route maps without
+  # `pipe_through`; `route_info/4` still exposes it. Probe each route's own verb
+  # against a placeholder-filled path to recover its scope pipelines and thread them
+  # onto the route, so the (strongest) pipeline signal can fire during classification.
+  # A route that already carries `pipe_through` is left untouched. Any lookup failure
+  # degrades to the unenriched route rather than raising.
+  defp recover_pipelines(router, route) when is_map(route) do
+    cond do
+      Map.get(route, :pipe_through) not in [nil, []] -> route
+      not function_exported?(Phoenix.Router, :route_info, 4) -> route
+      true -> Map.put(route, :pipe_through, route_pipelines(router, route))
+    end
+  end
+
+  defp recover_pipelines(_router, route), do: route
+
+  defp route_pipelines(router, route) do
+    method = route |> Map.get(:verb) |> probe_method()
+    path = route |> Map.get(:path) |> probe_path()
+
+    case apply(Phoenix.Router, :route_info, [router, method, path, ""]) do
+      %{pipe_through: pipe_through} when is_list(pipe_through) -> pipe_through
+      _ -> []
+    end
+  rescue
+    _ -> []
+  end
+
+  # A concrete probe path: dynamic (`:param`) and glob (`*rest`) segments become a
+  # literal placeholder so `route_info/4` can match the compiled route.
+  defp probe_path(nil), do: "/"
+
+  defp probe_path(path) do
+    segments =
+      path
+      |> String.split("/", trim: true)
+      |> Enum.map(fn
+        ":" <> _ -> "x"
+        "*" <> _ -> "x"
+        segment -> segment
+      end)
+
+    "/" <> Enum.join(segments, "/")
+  end
+
+  # `route_info/4` needs a real HTTP method; a match-all (`:*`) route resolves under
+  # any verb, so GET is a sound probe.
+  defp probe_method(:*), do: "GET"
+  defp probe_method(nil), do: "GET"
+  defp probe_method(verb) when is_atom(verb), do: verb |> Atom.to_string() |> String.upcase()
+  defp probe_method(verb) when is_binary(verb), do: String.upcase(verb)
 
   @doc """
   Folds already-fetched `routes` (structs or maps carrying `verb`, `path`, `plug`,
@@ -148,6 +215,8 @@ defmodule ArchLens.Collect.EntryPoints do
       &oauth_rule/1,
       &webhook_rule/1,
       &api_rule/1,
+      &dev_rule/1,
+      &health_rule/1,
       &browser_rule/1,
       &accepts_rule/1
     ]
@@ -173,7 +242,41 @@ defmodule ArchLens.Collect.EntryPoints do
   defp webhook_rule(route),
     do: named_rule(route, :webhook, ~r/webhook/, ~r/^webhooks?$/, ~r/webhook/i)
 
-  defp api_rule(route), do: named_rule(route, :api, ~r/api|bearer|token/, ~r/^api$/, ~r/api/i)
+  defp api_rule(route),
+    do: named_rule(route, :api, ~r/api|bearer|token|json|graphql/, ~r/^api$/, ~r/api/i)
+
+  # Dev tooling — LiveDashboard, mailbox preview, live/code reloader — rides the
+  # `:browser` pipeline but is never part of the product's inbound surface, so a
+  # `/dev` path segment or a dev-tooling plug refines it out ahead of `:browser`.
+  defp dev_rule(route) do
+    cond do
+      segment = matching_segment(route, ~r/^dev$/) ->
+        {:dev, "path segment /" <> segment}
+
+      module_matches?(route.plug, ~r/LiveDashboard|LiveReloader|MailboxPreview|CodeReloader/) ->
+        {:dev, "plug " <> Edge.module_name(route.plug) <> " is dev tooling"}
+
+      true ->
+        nil
+    end
+  end
+
+  # The monitoring surface: a bare `/health`(z) path segment or a Health-named plug.
+  # Fires on the path/plug signal only — a health route that rides the `api` pipeline
+  # is already `:api` by the time this runs — so `:health` stays reserved for the
+  # bare liveness/readiness endpoints.
+  defp health_rule(route) do
+    cond do
+      segment = matching_segment(route, ~r/^healthz?$/) ->
+        {:health, "path segment /" <> segment}
+
+      module_matches?(route.plug, ~r/(?:^|\.)Health/) ->
+        {:health, "plug " <> Edge.module_name(route.plug) <> " is a health check"}
+
+      true ->
+        nil
+    end
+  end
 
   # A kind identified by, in precedence order: a matching pipeline name, a matching
   # path segment, or a matching plug-module name. The basis names which fired.
@@ -195,9 +298,26 @@ defmodule ArchLens.Collect.EntryPoints do
 
   defp browser_rule(route) do
     cond do
-      live_view?(route) -> {:browser, "LiveView route"}
-      name = pipeline_matching(route, ~r/browser|html/) -> {:browser, "pipeline :" <> name}
-      true -> nil
+      live_view?(route) ->
+        {:browser, "LiveView route"}
+
+      name = pipeline_matching(route, ~r/browser|html|web|public|guest|live/) ->
+        {:browser, "pipeline :" <> name}
+
+      ext = web_document_extension(route) ->
+        {:browser, "serves a ." <> ext <> " document"}
+
+      true ->
+        nil
+    end
+  end
+
+  # A route whose path ends in a browser-served document extension (a feed, sitemap,
+  # robots file, …) is a browser entry point even without a pipeline signal.
+  defp web_document_extension(route) do
+    case Regex.run(~r/\.(xml|txt|rss|atom|ico|webmanifest|html)$/, route.path) do
+      [_full, ext] -> ext
+      _ -> nil
     end
   end
 
