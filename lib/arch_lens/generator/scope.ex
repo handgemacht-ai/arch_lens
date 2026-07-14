@@ -38,6 +38,15 @@ defmodule ArchLens.Generator.Scope do
   mirrors how `:edges` defaults to the recorded registry — an explicit
   `:entry_points` value always wins over all four.
 
+  `boundaries` is a wired seam mirroring `decisions`: `resolve/1` reads the app's
+  declared hex-`boundary` zones via `ArchLens.Collect.Boundaries.scan/1` (lib-only
+  discovery from `:app`, or an explicit `:boundary_modules` list in tests),
+  classifying each export against `:boundary_classifications`. It carries both the
+  clean `boundaries` and the `boundary_errors` the boundaries gate trips on. An app
+  without `boundary` (the lib absent, or `:boundaries_enabled` false) contributes an
+  empty list — the section is simply absent. An explicit `:boundaries` /
+  `:boundary_errors` value wins over the scan.
+
   `declared_architecture` is the other wired seam: pass `:declared_architecture`
   directly, or pass `:system` (a module that `use ArchLens.System`) and `resolve/1`
   reads its actors/externals/contexts, validates them against the already-collected
@@ -72,6 +81,8 @@ defmodule ArchLens.Generator.Scope do
             dependency_refs: [],
             decisions: [],
             decision_errors: [],
+            boundaries: [],
+            boundary_errors: [],
             declared_architecture: []
 
   @type t :: %__MODULE__{
@@ -93,6 +104,8 @@ defmodule ArchLens.Generator.Scope do
           dependency_refs: [map()],
           decisions: [map()],
           decision_errors: [{String.t(), String.t()}],
+          boundaries: [map()],
+          boundary_errors: [Collect.Boundaries.error()],
           declared_architecture: [term()]
         }
 
@@ -127,6 +140,16 @@ defmodule ArchLens.Generator.Scope do
         Collect.Decisions.scan(Keyword.get(opts, :decisions_dir))
       end)
 
+    boundary_scan =
+      Keyword.get_lazy(opts, :boundary_scan, fn ->
+        Collect.Boundaries.scan(
+          app: app,
+          boundary_modules: Keyword.get(opts, :boundary_modules),
+          classifications: Keyword.get(opts, :boundary_classifications, %{}),
+          enabled: Keyword.get(opts, :boundaries_enabled, true)
+        )
+      end)
+
     %__MODULE__{
       app: app,
       app_namespace: Keyword.get_lazy(opts, :app_namespace, fn -> default_namespace(app) end),
@@ -151,6 +174,8 @@ defmodule ArchLens.Generator.Scope do
         end),
       decisions: Keyword.get(opts, :decisions, decision_scan.decisions),
       decision_errors: Keyword.get(opts, :decision_errors, decision_scan.errors),
+      boundaries: Keyword.get(opts, :boundaries, boundary_scan.boundaries),
+      boundary_errors: Keyword.get(opts, :boundary_errors, boundary_scan.errors),
       declared_architecture:
         declared_architecture(
           opts,

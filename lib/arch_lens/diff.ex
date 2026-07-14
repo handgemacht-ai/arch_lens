@@ -60,6 +60,7 @@ defmodule ArchLens.Diff do
     context_dependencies
     flows
     decisions
+    boundaries
     data_inventory
   )
 
@@ -360,6 +361,7 @@ defmodule ArchLens.Diff do
   defp kind_of("context_dependencies", _entry), do: "context_dependency"
   defp kind_of("flows", _entry), do: "data_flow"
   defp kind_of("decisions", _entry), do: "decision"
+  defp kind_of("boundaries", _entry), do: "boundary"
   defp kind_of("data_inventory", _entry), do: "data_inventory"
 
   # --- privacy accessors --------------------------------------------------

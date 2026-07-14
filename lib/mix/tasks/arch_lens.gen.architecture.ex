@@ -46,7 +46,7 @@ defmodule Mix.Tasks.ArchLens.Gen.Architecture do
     path = Keyword.get(opts, :output, Architecture.artifact())
 
     emit(
-      [app: app] ++ router_opts() ++ endpoint_opts() ++ decisions_opts(),
+      [app: app] ++ router_opts() ++ endpoint_opts() ++ decisions_opts() ++ boundary_opts(),
       path,
       Keyword.get(opts, :check, false)
     )
@@ -81,6 +81,26 @@ defmodule Mix.Tasks.ArchLens.Gen.Architecture do
   # scans the right directory relative to the project root.
   defp decisions_opts do
     [decisions_dir: Application.get_env(:arch_lens, :decisions_dir, "docs/decisions")]
+  end
+
+  # Boundary ingestion is on by default and needs no config beyond `app:` (already
+  # threaded): `ArchLens.Collect.Boundaries` discovers the app's declared
+  # hex-`boundary` zones from its lib modules. A host app declares its
+  # sanctioned/grandfathered export classification with
+  # `config :arch_lens, :boundary_classifications`, and can opt out entirely with
+  # `config :arch_lens, :boundaries, false` (the escape hatch). An app without the
+  # `boundary` library contributes no boundaries section regardless.
+  defp boundary_opts do
+    case Application.get_env(:arch_lens, :boundaries, true) do
+      false ->
+        [boundaries_enabled: false]
+
+      _enabled ->
+        [
+          boundary_classifications:
+            Application.get_env(:arch_lens, :boundary_classifications, %{})
+        ]
+    end
   end
 
   @doc false
