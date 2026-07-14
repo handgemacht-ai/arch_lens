@@ -9,7 +9,7 @@
       "counts": {
         "actors": 6,
         "contexts": 22,
-        "entry_points": 45,
+        "entry_points": 58,
         "external_systems": 5,
         "oban_workers": 0,
         "resources": 26
@@ -43,7 +43,7 @@
       "counts": {
         "actors": 5,
         "contexts": 15,
-        "entry_points": 81,
+        "entry_points": 90,
         "external_systems": 5,
         "oban_workers": 2,
         "resources": 14
